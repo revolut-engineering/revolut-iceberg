@@ -21,19 +21,25 @@ if (project.hasProperty('release') && jdkVersion != '8') {
   throw new GradleException("Releases must be built with Java 8")
 }
 
+buildscript {
+  repositories {
+    maven { url "https://artifacts.apple.com/plugins-snapshot" }
+    maven { url "https://artifacts.apple.com/plugins-release" }
+  }
+  dependencies {
+    classpath "com.apple.cie.rio:gradle-build-plugin:3.+"
+  }
+}
+
+apply plugin: com.apple.cie.rio.group.RioGroupPlugin
+
 subprojects {
   apply plugin: 'maven-publish'
-  apply plugin: 'signing'
+  apply plugin: com.apple.cie.rio.binary.RioBinaryPlugin
 
   task sourceJar(type: Jar, dependsOn: classes) {
     classifier = 'sources'
     from sourceSets.main.allSource
-    group 'build'
-  }
-
-  task javadocJar(type: Jar, dependsOn: javadoc) {
-    classifier = 'javadoc'
-    from javadoc.destinationDir
     group 'build'
   }
 
@@ -47,14 +53,6 @@ subprojects {
     archives javadocJar
     archives testJar
     testArtifacts testJar
-  }
-
-  // add LICENSE and NOTICE
-  [jar, sourceJar, javadocJar, testJar].each { task ->
-    task.from(rootDir) {
-      include 'LICENSE'
-      include 'NOTICE'
-    }
   }
 
   publishing {
@@ -101,28 +99,6 @@ subprojects {
           }
         }
       }
-    }
-
-    repositories {
-      maven {
-        credentials {
-          username project.hasProperty('mavenUser') ? "$mavenUser" : ""
-          password project.hasProperty('mavenPassword') ? "$mavenPassword" : ""
-        }
-        // upload to the releases repository using ./gradlew -Prelease publish
-        def apacheSnapshotsRepoUrl = 'https://repository.apache.org/content/repositories/snapshots'
-        def apacheReleasesRepoUrl = 'https://repository.apache.org/service/local/staging/deploy/maven2'
-        def snapshotsRepoUrl = project.hasProperty('mavenSnapshotsRepo') ? "$mavenSnapshotsRepo" : "$apacheSnapshotsRepoUrl"
-        def releasesRepoUrl = project.hasProperty('mavenReleasesRepo') ? "$mavenReleasesRepo" : "$apacheReleasesRepoUrl"
-        url = project.hasProperty('release') ? releasesRepoUrl : snapshotsRepoUrl
-      }
-    }
-  }
-
-  if (project.hasProperty('release')) {
-    signing {
-      useGpgCmd()
-      sign publishing.publications.apache
     }
   }
 }

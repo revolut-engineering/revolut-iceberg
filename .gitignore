@@ -22,6 +22,11 @@ gradle/wrapper/gradle-wrapper.jar
 # rat library install location
 lib/
 
+# rio build
+.out
+*/.out
+*/.dist
+
 # web site build
 site/site
 

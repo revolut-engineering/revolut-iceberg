@@ -1,0 +1,55 @@
+schemaVersion: 2.0
+timeout: 60
+
+notify:
+  pullRequestComment:
+    postOnSuccess: false
+
+machine:
+  env:
+    RUNTIME_JDK_VERSION: 11
+    skipTest: false
+    CODE_VERSION: $(./code_version.sh)
+
+reports:
+  checkstyle: true
+  pmd: true
+  findbugs: true
+  junit: true
+
+pipelines:
+
+# prb builds
+- branchName: apple-0.13.x-preview
+  build:
+    template: buildozer:v4:prb
+
+- branchName: apple-0.13.x-preview-release
+  build:
+    template: buildozer:v4:prb
+
+# publish pipelines
+- branchName: apple-0.13.x-preview
+  build:
+    template: buildozer:v4:publish
+  package:
+    libraries:
+    - publish:
+      - repo: m2:oss-patched
+  finally:
+    radar:
+      annotate: true
+
+- branchName: apple-0.13.x-preview-release
+  build:
+    template: buildozer:v4:publish
+  package:
+    release: true
+    libraries:
+    - publish:
+      - repo: m2:oss-patched
+  finally:
+    radar:
+      annotate: true
+    tag:
+      expression: ${CODE_VERSION}
