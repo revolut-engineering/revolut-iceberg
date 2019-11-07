@@ -69,6 +69,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.BiMap;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableBiMap;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.util.Tasks;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -400,6 +401,10 @@ public class HiveTableOperations extends BaseMetastoreTableOperations {
       storageDescriptor.setInputFormat("org.apache.hadoop.mapred.FileInputFormat");
       serDeInfo.setSerializationLib("org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe");
     }
+    // we need to persist the path in serde params for compatibility with Spark tables
+    Map<String, String> serDeParams = Maps.newHashMap();
+    serDeParams.put("path", metadata.location());
+    serDeInfo.setParameters(serDeParams);
     storageDescriptor.setSerdeInfo(serDeInfo);
     return storageDescriptor;
   }
