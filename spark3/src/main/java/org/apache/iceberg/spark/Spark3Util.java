@@ -492,10 +492,13 @@ public class Spark3Util {
   }
 
   public static boolean isLocalityEnabled(FileIO io, String location, CaseInsensitiveStringMap readOptions) {
-    InputFile in = io.newInputFile(location);
-    if (in instanceof HadoopInputFile) {
-      String scheme = ((HadoopInputFile) in).getFileSystem().getScheme();
-      return readOptions.getBoolean("locality", LOCALITY_WHITELIST_FS.contains(scheme));
+    boolean localityOption = readOptions.getBoolean("locality", false);
+    if (localityOption) {
+      InputFile in = io.newInputFile(location);
+      if (in instanceof HadoopInputFile) {
+        String scheme = ((HadoopInputFile) in).getFileSystem().getScheme();
+        return LOCALITY_WHITELIST_FS.contains(scheme);
+      }
     }
     return false;
   }
