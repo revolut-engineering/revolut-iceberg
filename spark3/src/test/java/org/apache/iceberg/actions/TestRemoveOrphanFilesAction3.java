@@ -31,6 +31,7 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class TestRemoveOrphanFilesAction3 extends TestRemoveOrphanFilesAction {
@@ -166,4 +167,7 @@ public class TestRemoveOrphanFilesAction3 extends TestRemoveOrphanFilesAction {
     spark.conf().unset("spark.sql.catalog.spark_catalog.warehouse");
   }
 
+  @Ignore
+  public void testOlderThanTimestampWithPartitionWithWhitSpace() {
+  }
 }

@@ -19,7 +19,6 @@
 
 package org.apache.iceberg.spark.actions;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
@@ -48,10 +47,13 @@ import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.expressions.UserDefinedFunction;
 import org.apache.spark.sql.functions;
 import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.apache.spark.util.SerializableConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,14 +79,21 @@ public class BaseDeleteOrphanFilesSparkAction
     extends BaseSparkAction<DeleteOrphanFiles, DeleteOrphanFiles.Result> implements DeleteOrphanFiles {
 
   private static final Logger LOG = LoggerFactory.getLogger(BaseDeleteOrphanFilesSparkAction.class);
-  private static final UserDefinedFunction filenameUDF = functions.udf((String path) -> {
-    int lastIndex = path.lastIndexOf(File.separator);
-    if (lastIndex == -1) {
-      return path;
-    } else {
-      return path.substring(lastIndex + 1);
-    }
-  }, DataTypes.StringType);
+  private static final String URI_DETAIL = "URI_DETAIL";
+  private static final String FILE_NAME = "file_name";
+  private static final String FILE_PATH = "file_path";
+  private static final String FILE_PATH_ONLY = "file_path_only";
+  private static final StructType FILE_DETAIL_STRUCT =  new StructType(new StructField[] {
+      DataTypes.createStructField(FILE_NAME, DataTypes.StringType, false),
+      DataTypes.createStructField(FILE_PATH_ONLY, DataTypes.StringType, false)
+  });
+
+  private static final UserDefinedFunction ADD_FILE_DETAILS_UDF = functions.udf((String fileLocation) -> {
+    Path fullyQualifiedPath = new Path(fileLocation);
+    String fileName = fullyQualifiedPath.getName();
+    String filePathOnly = fullyQualifiedPath.toUri().getPath();
+    return RowFactory.create(fileName, filePathOnly);
+  }, FILE_DETAIL_STRUCT);
 
   private final SerializableConfiguration hadoopConf;
   private final int partitionDiscoveryParallelism;
@@ -153,17 +162,10 @@ public class BaseDeleteOrphanFilesSparkAction
   private DeleteOrphanFiles.Result doExecute() {
     Dataset<Row> validDataFileDF = buildValidDataFileDF(table);
     Dataset<Row> validMetadataFileDF = buildValidMetadataFileDF(table);
-    Dataset<Row> validFileDF = validDataFileDF.union(validMetadataFileDF);
-    Dataset<Row> actualFileDF = buildActualFileDF();
+    Dataset<Row> validFileDF = addFilePathOnlyColumn(validDataFileDF.union(validMetadataFileDF));
+    Dataset<Row> actualFileDF = addFilePathOnlyColumn(buildActualFileDF());
 
-    Column actualFileName = filenameUDF.apply(actualFileDF.col("file_path"));
-    Column validFileName = filenameUDF.apply(validFileDF.col("file_path"));
-    Column nameEqual = actualFileName.equalTo(validFileName);
-    Column actualContains = actualFileDF.col("file_path").contains(validFileDF.col("file_path"));
-    Column joinCond = nameEqual.and(actualContains);
-    List<String> orphanFiles = actualFileDF.join(validFileDF, joinCond, "leftanti")
-        .as(Encoders.STRING())
-        .collectAsList();
+    List<String> orphanFiles = findOrphanFiles(validFileDF, actualFileDF);
 
     Tasks.foreach(orphanFiles)
         .noRetry()
@@ -197,6 +199,28 @@ public class BaseDeleteOrphanFilesSparkAction
 
     JavaRDD<String> completeMatchingFileRDD = matchingFileRDD.union(matchingLeafFileRDD);
     return spark().createDataset(completeMatchingFileRDD.rdd(), Encoders.STRING()).toDF("file_path");
+  }
+
+  // visible for testing
+  public static Dataset<Row> addFilePathOnlyColumn(Dataset<Row> filePathWithSchemeAndAuthority) {
+    String selectExprFormat = "%s.%s as %s";
+    return filePathWithSchemeAndAuthority
+        .withColumn(URI_DETAIL, ADD_FILE_DETAILS_UDF.apply(filePathWithSchemeAndAuthority.apply(FILE_PATH)))
+        .selectExpr(
+            String.format(selectExprFormat, URI_DETAIL, FILE_NAME, FILE_NAME), // file name
+            String.format(selectExprFormat, URI_DETAIL, FILE_PATH_ONLY, FILE_PATH_ONLY), // file path only
+            FILE_PATH); // fully qualified path
+  }
+
+  // visible for testing
+  public static List<String> findOrphanFiles(Dataset<Row> validFileDF, Dataset<Row> actualFileDF) {
+    Column nameEqual = actualFileDF.col(FILE_NAME).equalTo(validFileDF.col(FILE_NAME));
+    Column pathContains = actualFileDF.col(FILE_PATH_ONLY).contains(validFileDF.col(FILE_PATH_ONLY));
+    Column joinCond = nameEqual.and(pathContains);
+
+    return actualFileDF.join(validFileDF, joinCond, "leftanti").select(FILE_PATH)
+        .as(Encoders.STRING())
+        .collectAsList();
   }
 
   private static void listDirRecursively(
