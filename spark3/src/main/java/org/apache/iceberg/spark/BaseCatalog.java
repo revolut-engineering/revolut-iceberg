@@ -19,16 +19,32 @@
 
 package org.apache.iceberg.spark;
 
+import java.util.Locale;
+import java.util.Map;
+import org.apache.iceberg.actions.Spark3MigrateAction;
+import org.apache.iceberg.actions.Spark3SnapshotAction;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.spark.procedures.SparkProcedures;
 import org.apache.iceberg.spark.procedures.SparkProcedures.ProcedureBuilder;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NoSuchProcedureException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Procedure;
 import org.apache.spark.sql.connector.catalog.ProcedureCatalog;
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog;
+import org.apache.spark.sql.connector.catalog.SupportsMigrate;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
+import org.apache.spark.sql.connector.catalog.SupportsSnapshot;
+import org.apache.spark.sql.connector.catalog.Table;
+import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-abstract class BaseCatalog implements StagingTableCatalog, ProcedureCatalog, SupportsNamespaces {
+abstract class BaseCatalog implements StagingTableCatalog, ProcedureCatalog,
+    SupportsNamespaces, SupportsMigrate, SupportsSnapshot {
+
+  private static final Logger LOG = LoggerFactory.getLogger(BaseCatalog.class);
 
   @Override
   public Procedure loadProcedure(Identifier ident) throws NoSuchProcedureException {
@@ -44,5 +60,48 @@ abstract class BaseCatalog implements StagingTableCatalog, ProcedureCatalog, Sup
     }
 
     throw new NoSuchProcedureException(ident);
+  }
+
+  @Override
+  public Table migrateTable(Identifier ident, Map<String, String> properties) {
+    Preconditions.checkArgument(
+        provider(properties).equals("iceberg"),
+        "Iceberg catalogs cannot MIGRATE to a format other than Iceberg");
+
+    SparkSession spark = SparkSession.active();
+    Spark3MigrateAction action = new Spark3MigrateAction(spark, this, ident);
+    Long migratedFilesCount = action.withProperties(properties).execute();
+    LOG.info("Migrated table {} and registered {} files", ident, migratedFilesCount);
+
+    try {
+      return loadTable(ident);
+    } catch (NoSuchTableException e) {
+      throw new org.apache.iceberg.exceptions.NoSuchTableException(
+          "Migration succeeded but the table %s no longer exists in the catalog.", ident);
+    }
+  }
+
+  @Override
+  public Table snapshotTable(TableCatalog sourceCatalog, Identifier sourceIdent,
+                             Identifier ident, Map<String, String> properties) {
+    Preconditions.checkArgument(
+        provider(properties).equals("iceberg"),
+        "Iceberg catalogs cannot SNAPSHOT to a format other than Iceberg");
+
+    SparkSession spark = SparkSession.active();
+    Spark3SnapshotAction action = new Spark3SnapshotAction(spark, sourceCatalog, sourceIdent, this, ident);
+    Long filesCount = action.withProperties(properties).execute();
+    LOG.info("Created a snapshot table {} with {} files from {}.{}", ident, filesCount, sourceCatalog, sourceIdent);
+
+    try {
+      return loadTable(ident);
+    } catch (NoSuchTableException e) {
+      throw new org.apache.iceberg.exceptions.NoSuchTableException(
+          "SNAPSHOT succeeded but the created table %s no longer exists in the catalog.", ident);
+    }
+  }
+
+  private String provider(Map<String, String> properties) {
+    return properties.getOrDefault(TableCatalog.PROP_PROVIDER, "iceberg").toLowerCase(Locale.ROOT);
   }
 }
