@@ -75,13 +75,13 @@ public class TableProperties {
   public static final long COMMIT_STATUS_CHECKS_TOTAL_WAIT_MS_DEFAULT = 1800000; // 30 minutes
 
   public static final String MANIFEST_TARGET_SIZE_BYTES = "commit.manifest.target-size-bytes";
-  public static final long MANIFEST_TARGET_SIZE_BYTES_DEFAULT = 8388608; // 8 MB
+  public static final long MANIFEST_TARGET_SIZE_BYTES_DEFAULT = 4 * 1024 * 1024; // 4 MB
 
   public static final String MANIFEST_MIN_MERGE_COUNT = "commit.manifest.min-count-to-merge";
   public static final int MANIFEST_MIN_MERGE_COUNT_DEFAULT = 100;
 
   public static final String MANIFEST_MERGE_ENABLED = "commit.manifest-merge.enabled";
-  public static final boolean MANIFEST_MERGE_ENABLED_DEFAULT = true;
+  public static final boolean MANIFEST_MERGE_ENABLED_DEFAULT = false;
 
   public static final String DEFAULT_FILE_FORMAT = "write.format.default";
   public static final String DELETE_DEFAULT_FILE_FORMAT = "write.delete.format.default";
@@ -124,7 +124,7 @@ public class TableProperties {
   public static final long SPLIT_OPEN_FILE_COST_DEFAULT = 4 * 1024 * 1024; // 4MB
 
   public static final String PARQUET_VECTORIZATION_ENABLED = "read.parquet.vectorization.enabled";
-  public static final boolean PARQUET_VECTORIZATION_ENABLED_DEFAULT = false;
+  public static final boolean PARQUET_VECTORIZATION_ENABLED_DEFAULT = true;
 
   public static final String PARQUET_BATCH_SIZE = "read.parquet.vectorization.batch-size";
   public static final int PARQUET_BATCH_SIZE_DEFAULT = 5000;
@@ -201,7 +201,7 @@ public class TableProperties {
   public static final boolean SPARK_WRITE_PARTITIONED_FANOUT_ENABLED_DEFAULT = false;
 
   public static final String SNAPSHOT_ID_INHERITANCE_ENABLED = "compatibility.snapshot-id-inheritance.enabled";
-  public static final boolean SNAPSHOT_ID_INHERITANCE_ENABLED_DEFAULT = false;
+  public static final boolean SNAPSHOT_ID_INHERITANCE_ENABLED_DEFAULT = true;
 
   public static final String ENGINE_HIVE_ENABLED = "engine.hive.enabled";
   public static final boolean ENGINE_HIVE_ENABLED_DEFAULT = false;
