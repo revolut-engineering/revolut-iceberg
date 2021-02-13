@@ -58,7 +58,13 @@ public class TestTables {
       throw new AlreadyExistsException("Table %s already exists at location: %s", name, temp);
     }
 
-    ops.commit(null, newTableMetadata(schema, spec, sortOrder, temp.toString(), ImmutableMap.of(), formatVersion));
+    // create test tables with OSS default values to avoid changing tests
+    ImmutableMap<String, String> properties = ImmutableMap.of(
+        TableProperties.SNAPSHOT_ID_INHERITANCE_ENABLED, "false",
+        TableProperties.MANIFEST_MERGE_ENABLED, "true"
+    );
+
+    ops.commit(null, newTableMetadata(schema, spec, sortOrder, temp.toString(), properties, formatVersion));
 
     return new TestTable(ops, name);
   }

@@ -34,7 +34,9 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
+import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.TestTables;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.io.Files;
 import org.apache.iceberg.types.Types;
@@ -115,7 +117,13 @@ public class HadoopTableTestBase {
     this.tableLocation = tableDir.toURI().toString();
     this.metadataDir = new File(tableDir, "metadata");
     this.versionHintFile = new File(metadataDir, "version-hint.text");
-    this.table = TABLES.create(SCHEMA, SPEC, tableLocation);
+
+    // create test tables with OSS default values to avoid changing tests
+    ImmutableMap<String, String> properties = ImmutableMap.of(
+        TableProperties.SNAPSHOT_ID_INHERITANCE_ENABLED, "false",
+        TableProperties.MANIFEST_MERGE_ENABLED, "true"
+    );
+    this.table = TABLES.create(SCHEMA, SPEC, properties, tableLocation);
   }
 
   List<File> listManifestFiles() {
