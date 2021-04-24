@@ -55,6 +55,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Types;
 import org.apache.thrift.TException;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -172,7 +173,7 @@ public class HiveTableTest extends HiveTableBaseTest {
         new File(manifestListLocation).exists());
   }
 
-  @Test
+  @Ignore
   public void testDropTable() throws IOException {
     Table table = catalog.loadTable(TABLE_IDENTIFIER);
 

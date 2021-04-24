@@ -64,6 +64,10 @@ public class CatalogUtil {
   private CatalogUtil() {
   }
 
+  public static void dropTableData(FileIO io, TableMetadata metadata) {
+    // do nothing as we don't delete files in Apple specific builds
+  }
+
   /**
    * Drops all data and metadata files referenced by TableMetadata.
    * <p>
@@ -73,7 +77,7 @@ public class CatalogUtil {
    * @param io a FileIO to use for deletes
    * @param metadata the last valid TableMetadata instance for a dropped table.
    */
-  public static void dropTableData(FileIO io, TableMetadata metadata) {
+  public static void deleteTableData(FileIO io, TableMetadata metadata) {
     // Reads and deletes are done using Tasks.foreach(...).suppressFailureWhenFinished to complete
     // as much of the delete work as possible and avoid orphaned data or manifest files.
 
