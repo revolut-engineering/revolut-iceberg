@@ -34,6 +34,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.apache.iceberg.AllManifestsTable;
+import java.util.stream.Stream;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
@@ -67,6 +68,12 @@ import org.apache.iceberg.spark.JobGroupUtils;
 import org.apache.iceberg.spark.SparkTableUtil;
 import org.apache.iceberg.spark.source.SerializableTableWithSize;
 import org.apache.iceberg.util.Tasks;
+import org.apache.iceberg.relocated.com.google.common.collect.Streams;
+import org.apache.iceberg.spark.JobGroupInfo;
+import org.apache.iceberg.spark.JobGroupUtils;
+import org.apache.iceberg.spark.SparkTableUtil;
+import org.apache.iceberg.spark.SparkUtil;
+import org.apache.iceberg.util.Pair;
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
@@ -77,6 +84,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import scala.Tuple2;
 
 abstract class BaseSparkAction<ThisT> {
 
@@ -145,7 +153,10 @@ abstract class BaseSparkAction<ThisT> {
   }
 
   protected Table newStaticTable(TableMetadata metadata, FileIO io) {
-    String metadataFileLocation = metadata.metadataFileLocation();
+    return newStaticTable(metadata.metadataFileLocation(), io);
+  }
+
+  protected Table newStaticTable(String metadataFileLocation, FileIO io) {
     StaticTableOperations ops = new StaticTableOperations(metadataFileLocation, io);
     return new BaseTable(ops, metadataFileLocation);
   }
@@ -182,6 +193,37 @@ abstract class BaseSparkAction<ThisT> {
     return manifestDF(table, snapshotIds)
         .select(col("path"), lit(MANIFEST).as("type"))
         .as(FileInfo.ENCODER);
+  }
+  protected Dataset<Row> buildValidDataFileDF(Table table) {
+    JavaSparkContext context = JavaSparkContext.fromSparkContext(spark.sparkContext());
+    Broadcast<FileIO> ioBroadcast = context.broadcast(SparkUtil.serializableFileIO(table));
+
+    Dataset<ManifestFileBean> allManifests = loadMetadataTable(table, ALL_MANIFESTS)
+        .selectExpr("path", "length", "partition_spec_id as partitionSpecId", "added_snapshot_id as addedSnapshotId")
+        .dropDuplicates("path")
+        .repartition(spark.sessionState().conf().numShufflePartitions()) // avoid adaptive execution combining tasks
+        .as(Encoders.bean(ManifestFileBean.class));
+
+    return allManifests.flatMap(new ReadManifest(ioBroadcast), Encoders.STRING()).toDF("file_path");
+  }
+
+  protected Dataset<Row> buildValidDataFileDFWithSnapshotId(Table table) {
+    JavaSparkContext context = JavaSparkContext.fromSparkContext(spark.sparkContext());
+    Broadcast<FileIO> ioBroadcast = context.broadcast(SparkUtil.serializableFileIO(table));
+
+    Dataset<ManifestFileBean> allManifests = loadMetadataTable(table, ALL_MANIFESTS)
+        .selectExpr("path", "length", "partition_spec_id as partitionSpecId", "added_snapshot_id as addedSnapshotId")
+        .dropDuplicates("path")
+        .repartition(spark.sessionState().conf().numShufflePartitions()) // avoid adaptive execution combining tasks
+        .as(Encoders.bean(ManifestFileBean.class));
+
+    return allManifests.flatMap(
+        new ReadManifestWithSnapshotId(ioBroadcast),
+        Encoders.tuple(Encoders.STRING(), Encoders.LONG())).toDF("file_path", "snapshot_id");
+  }
+
+  protected Dataset<Row> buildManifestFileDF(Table table) {
+    return loadMetadataTable(table, ALL_MANIFESTS).select(col("path").as(FILE_PATH));
   }
 
   private Dataset<Row> manifestDF(Table table, Set<Long> snapshotIds) {
@@ -449,6 +491,22 @@ abstract class BaseSparkAction<ThisT> {
 
     static FileInfo toFileInfo(ContentFile<?> file) {
       return new FileInfo(file.path().toString(), file.content().toString());
+    }
+  }
+
+  private static class ReadManifestWithSnapshotId implements FlatMapFunction<ManifestFileBean, Tuple2<String, Long>> {
+    private final Broadcast<FileIO> io;
+
+    ReadManifestWithSnapshotId(Broadcast<FileIO> io) {
+      this.io = io;
+    }
+
+    @Override
+    public Iterator<Tuple2<String, Long>> call(ManifestFileBean manifest) {
+      Iterator<Pair<String, Long>> iterator =
+          new ClosingIterator<>(ManifestFiles.readPathsWithSnapshotId(manifest, io.getValue()).iterator());
+      Stream<Pair<String, Long>> stream = Streams.stream(iterator);
+      return stream.map(pair -> Tuple2.apply(pair.first(), pair.second())).iterator();
     }
   }
 }
