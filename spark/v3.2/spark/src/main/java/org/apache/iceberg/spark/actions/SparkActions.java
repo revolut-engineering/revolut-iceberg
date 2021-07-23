@@ -20,6 +20,16 @@ package org.apache.iceberg.spark.actions;
 
 import org.apache.iceberg.Table;
 import org.apache.iceberg.actions.ActionsProvider;
+import org.apache.iceberg.actions.CheckSnapshotIntegrity;
+import org.apache.iceberg.actions.CopyTable;
+import org.apache.iceberg.actions.DeleteOrphanFiles;
+import org.apache.iceberg.actions.DeleteReachableFiles;
+import org.apache.iceberg.actions.ExpireSnapshots;
+import org.apache.iceberg.actions.MigrateTable;
+import org.apache.iceberg.actions.RemoveExpiredFiles;
+import org.apache.iceberg.actions.RewriteDataFiles;
+import org.apache.iceberg.actions.RewriteManifests;
+import org.apache.iceberg.actions.SnapshotTable;
 import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.Spark3Util.CatalogAndIdentifier;
 import org.apache.spark.sql.SparkSession;
@@ -90,5 +100,20 @@ public class SparkActions implements ActionsProvider {
   @Override
   public DeleteReachableFilesSparkAction deleteReachableFiles(String metadataLocation) {
     return new DeleteReachableFilesSparkAction(spark, metadataLocation);
+  }
+
+  @Override
+  public CopyTable copyTable(Table table) {
+    return new BaseCopyTableSparkAction(spark, table);
+  }
+
+  @Override
+  public CheckSnapshotIntegrity checkSnapshotIntegrity(Table table) {
+    return new BaseCheckSnapshotIntegritySparkAction(spark, table);
+  }
+
+  @Override
+  public RemoveExpiredFiles removeExpiredFiles(Table table) {
+    return new BaseRemoveExpiredFilesSparkAction(spark, table);
   }
 }

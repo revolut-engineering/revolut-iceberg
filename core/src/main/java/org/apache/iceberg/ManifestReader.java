@@ -202,10 +202,10 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
     return this;
   }
 
-  CloseableIterable<ManifestEntry<F>> entries() {
-    if ((rowFilter != null && rowFilter != Expressions.alwaysTrue())
-        || (partFilter != null && partFilter != Expressions.alwaysTrue())
-        || (partitionSet != null)) {
+  public CloseableIterable<ManifestEntry<F>> entries() {
+    if ((rowFilter != null && rowFilter != Expressions.alwaysTrue()) ||
+        (partFilter != null && partFilter != Expressions.alwaysTrue()) ||
+        (partitionSet != null)) {
       Evaluator evaluator = evaluator();
       InclusiveMetricsEvaluator metricsEvaluator = metricsEvaluator();
 
