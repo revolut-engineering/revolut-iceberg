@@ -21,6 +21,7 @@ package org.apache.iceberg.spark.procedures;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.function.Supplier;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.spark.sql.connector.catalog.Procedure;
@@ -29,6 +30,8 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 public class SparkProcedures {
 
   private static final Map<String, Supplier<ProcedureBuilder>> BUILDERS = initProcedureBuilders();
+  private static final Map<String, Supplier<ProcedureBuilder>>
+      AUTO_MANAGEMENT_BUILDERS = initAutoManagementProcedureBuilders();
 
   private SparkProcedures() {
   }
@@ -36,6 +39,11 @@ public class SparkProcedures {
   public static ProcedureBuilder newBuilder(String name) {
     // procedure resolution is case insensitive to match the existing Spark behavior for functions
     Supplier<ProcedureBuilder> builderSupplier = BUILDERS.get(name.toLowerCase(Locale.ROOT));
+    if (builderSupplier == null) {
+      // if there are no system procedures, search in auto management procedures
+      builderSupplier = AUTO_MANAGEMENT_BUILDERS.get(name.toLowerCase(Locale.ROOT));
+    }
+
     return builderSupplier != null ? builderSupplier.get() : null;
   }
 
@@ -52,6 +60,17 @@ public class SparkProcedures {
     mapBuilder.put("snapshot", SnapshotTableProcedure::builder);
     mapBuilder.put("add_files", AddFilesProcedure::builder);
     return mapBuilder.build();
+  }
+
+  private static Map<String, Supplier<ProcedureBuilder>> initAutoManagementProcedureBuilders() {
+    ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> mapBuilder = ImmutableMap.builder();
+    ServiceLoader<AutoManagementSparkProcedures> services = ServiceLoader.load(AutoManagementSparkProcedures.class);
+
+    services.forEach(autoManagementSparkProcedures -> {
+      autoManagementSparkProcedures.builders().forEach(mapBuilder::put);
+    });
+    return mapBuilder.build();
+
   }
 
   public interface ProcedureBuilder {

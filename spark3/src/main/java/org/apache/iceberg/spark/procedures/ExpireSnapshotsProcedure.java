@@ -19,8 +19,10 @@
 
 package org.apache.iceberg.spark.procedures;
 
+import org.apache.iceberg.Table;
 import org.apache.iceberg.actions.Actions;
 import org.apache.iceberg.actions.ExpireSnapshots;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.spark.procedures.SparkProcedures.ProcedureBuilder;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -77,6 +79,9 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
   @Override
   public InternalRow[] call(InternalRow args) {
     Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
+    Table icebergTable = loadSparkTable(tableIdent).table();
+    ValidationException.check(!Boolean.parseBoolean(icebergTable.properties().get("auto-management.enabled")),
+        "Cannot expire snapshots manually in the table opted into auto management");
     Long olderThanMillis = args.isNullAt(1) ? null : DateTimeUtils.microsToMillis(args.getLong(1));
     Integer retainLastNum = args.isNullAt(2) ? null : args.getInt(2);
 
