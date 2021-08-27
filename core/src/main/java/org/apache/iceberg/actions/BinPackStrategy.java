@@ -60,17 +60,17 @@ public abstract class BinPackStrategy implements RewriteStrategy {
    * {@link #MIN_FILE_SIZE_BYTES} will be considered for rewriting. This functions independently
    * of {@link #MAX_FILE_SIZE_BYTES}.
    * <p>
-   * Defaults to 75% of the target file size
+   * Defaults to {@link #MIN_FILE_SIZE_DEFAULT_RATIO} of the target file size
    */
   public static final String MIN_FILE_SIZE_BYTES = "min-file-size-bytes";
-  public static final double MIN_FILE_SIZE_DEFAULT_RATIO = 0.75d;
+  public static final double MIN_FILE_SIZE_DEFAULT_RATIO = 0.50d;
 
   /**
    * Adjusts files which will be considered for rewriting. Files larger than
    * {@link #MAX_FILE_SIZE_BYTES} will be considered for rewriting. This functions independently
    * of {@link #MIN_FILE_SIZE_BYTES}.
    * <p>
-   * Defaults to 180% of the target file size
+   * Defaults to {@link #MAX_FILE_SIZE_DEFAULT_RATIO} of the target file size
    */
   public static final String MAX_FILE_SIZE_BYTES = "max-file-size-bytes";
   public static final double MAX_FILE_SIZE_DEFAULT_RATIO = 1.80d;
