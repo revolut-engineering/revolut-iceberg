@@ -68,11 +68,15 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.connector.distributions.Distribution;
+import org.apache.spark.sql.connector.expressions.SortOrder;
 import org.apache.spark.sql.connector.write.BatchWrite;
 import org.apache.spark.sql.connector.write.DataWriter;
 import org.apache.spark.sql.connector.write.DataWriterFactory;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
 import org.apache.spark.sql.connector.write.PhysicalWriteInfo;
+import org.apache.spark.sql.connector.write.RequiresDistributionAndOrdering;
+import org.apache.spark.sql.connector.write.Write;
 import org.apache.spark.sql.connector.write.WriterCommitMessage;
 import org.apache.spark.sql.connector.write.streaming.StreamingDataWriterFactory;
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite;
@@ -97,7 +101,7 @@ import static org.apache.iceberg.TableProperties.SPARK_WRITE_PARTITIONED_FANOUT_
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT;
 
-class SparkWrite {
+abstract class SparkWrite implements Write, RequiresDistributionAndOrdering {
   private static final Logger LOG = LoggerFactory.getLogger(SparkWrite.class);
 
   private final JavaSparkContext sparkContext;
@@ -111,10 +115,12 @@ class SparkWrite {
   private final StructType dsSchema;
   private final Map<String, String> extraSnapshotMetadata;
   private final boolean partitionedFanoutEnabled;
+  private final Distribution requiredDistribution;
+  private final SortOrder[] requiredOrdering;
 
   SparkWrite(SparkSession spark, Table table, LogicalWriteInfo writeInfo,
-             String applicationId, String wapId,
-             Schema writeSchema, StructType dsSchema) {
+             String applicationId, String wapId, Schema writeSchema, StructType dsSchema,
+             Distribution requiredDistribution, SortOrder[] requiredOrdering) {
     this.sparkContext = JavaSparkContext.fromSparkContext(spark.sparkContext());
     this.table = table;
     this.queryId = writeInfo.queryId();
@@ -139,6 +145,19 @@ class SparkWrite {
         table.properties(), SPARK_WRITE_PARTITIONED_FANOUT_ENABLED, SPARK_WRITE_PARTITIONED_FANOUT_ENABLED_DEFAULT);
     this.partitionedFanoutEnabled = writeInfo.options()
         .getBoolean(SparkWriteOptions.FANOUT_ENABLED, tablePartitionedFanoutEnabled);
+
+    this.requiredDistribution = requiredDistribution;
+    this.requiredOrdering = requiredOrdering;
+  }
+
+  @Override
+  public Distribution requiredDistribution() {
+    return requiredDistribution;
+  }
+
+  @Override
+  public SortOrder[] requiredOrdering() {
+    return requiredOrdering;
   }
 
   BatchWrite asBatchAppend() {
@@ -153,8 +172,8 @@ class SparkWrite {
     return new OverwriteByFilter(overwriteExpr);
   }
 
-  BatchWrite asCopyOnWriteMergeWrite(SparkMergeScan scan, IsolationLevel isolationLevel) {
-    return new CopyOnWriteMergeWrite(scan, isolationLevel);
+  BatchWrite asCopyOnWriteMergeWrite(SparkCopyOnWriteScan scan, IsolationLevel isolationLevel) {
+    return new CopyOnWriteOperationWrite(scan, isolationLevel);
   }
 
   BatchWrite asRewrite(String fileSetID) {
@@ -235,6 +254,11 @@ class SparkWrite {
     return ImmutableList.of();
   }
 
+  @Override
+  public String toString() {
+    return String.format("IcebergWrite(table=%s, format=%s)", table, format);
+  }
+
   private abstract class BaseBatchWrite implements BatchWrite {
     @Override
     public DataWriterFactory createBatchWriterFactory(PhysicalWriteInfo info) {
@@ -312,11 +336,11 @@ class SparkWrite {
     }
   }
 
-  private class CopyOnWriteMergeWrite extends BaseBatchWrite {
-    private final SparkMergeScan scan;
+  private class CopyOnWriteOperationWrite extends BaseBatchWrite {
+    private final SparkCopyOnWriteScan scan;
     private final IsolationLevel isolationLevel;
 
-    private CopyOnWriteMergeWrite(SparkMergeScan scan, IsolationLevel isolationLevel) {
+    private CopyOnWriteOperationWrite(SparkCopyOnWriteScan scan, IsolationLevel isolationLevel) {
       this.scan = scan;
       this.isolationLevel = isolationLevel;
     }

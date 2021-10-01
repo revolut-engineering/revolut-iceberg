@@ -23,8 +23,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+import org.apache.spark.sql.connector.catalog.Procedure;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.connector.iceberg.catalog.Procedure;
 
 public class SparkProcedures {
 

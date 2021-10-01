@@ -19,14 +19,18 @@
 
 package org.apache.iceberg.spark;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CachingCatalog;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
+import org.apache.iceberg.DistributionMode;
+import org.apache.iceberg.ReplaceSortOrder;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
@@ -35,6 +39,8 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.expressions.NamedReference;
+import org.apache.iceberg.expressions.Term;
 import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
@@ -56,12 +62,20 @@ import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.StagedTable;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.catalog.TableChange.AddPartitionField;
 import org.apache.spark.sql.connector.catalog.TableChange.ColumnChange;
+import org.apache.spark.sql.connector.catalog.TableChange.DropIdentifierFields;
+import org.apache.spark.sql.connector.catalog.TableChange.DropPartitionField;
 import org.apache.spark.sql.connector.catalog.TableChange.RemoveProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.ReplacePartitionField;
+import org.apache.spark.sql.connector.catalog.TableChange.SetIdentifierFields;
 import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
+import org.apache.spark.sql.connector.catalog.TableChange.SetWriteDistributionAndOrdering;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+
+import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 
 /**
  * A Spark TableCatalog implementation that wraps an Iceberg {@link Catalog}.
@@ -188,10 +202,17 @@ public class SparkCatalog extends BaseCatalog {
   }
 
   @Override
+  @SuppressWarnings("checkstyle:CyclomaticComplexity")
   public SparkTable alterTable(Identifier ident, TableChange... changes) throws NoSuchTableException {
     SetProperty setLocation = null;
     SetProperty setSnapshotId = null;
     SetProperty pickSnapshotId = null;
+    SetWriteDistributionAndOrdering setWriteDistributionAndOrdering = null;
+    AddPartitionField addPartitionField = null;
+    DropPartitionField dropPartitionField = null;
+    ReplacePartitionField replacePartitionField = null;
+    SetIdentifierFields setIdentifierFields = null;
+    DropIdentifierFields dropIdentifierFields = null;
     List<TableChange> propertyChanges = Lists.newArrayList();
     List<TableChange> schemaChanges = Lists.newArrayList();
 
@@ -214,6 +235,18 @@ public class SparkCatalog extends BaseCatalog {
         propertyChanges.add(change);
       } else if (change instanceof ColumnChange) {
         schemaChanges.add(change);
+      } else if (change instanceof SetWriteDistributionAndOrdering) {
+        setWriteDistributionAndOrdering = (SetWriteDistributionAndOrdering) change;
+      } else if (change instanceof AddPartitionField) {
+        addPartitionField = (AddPartitionField) change;
+      } else if (change instanceof DropPartitionField) {
+        dropPartitionField = (DropPartitionField) change;
+      } else if (change instanceof ReplacePartitionField) {
+        replacePartitionField = (ReplacePartitionField) change;
+      } else if (change instanceof SetIdentifierFields) {
+        setIdentifierFields = (SetIdentifierFields) change;
+      } else if (change instanceof DropIdentifierFields) {
+        dropIdentifierFields = (DropIdentifierFields) change;
       } else {
         throw new UnsupportedOperationException("Cannot apply unknown table change: " + change);
       }
@@ -221,7 +254,11 @@ public class SparkCatalog extends BaseCatalog {
 
     try {
       Table table = load(ident);
-      commitChanges(table, setLocation, setSnapshotId, pickSnapshotId, propertyChanges, schemaChanges);
+      commitChanges(
+          table, setLocation, setSnapshotId, pickSnapshotId, propertyChanges,
+          schemaChanges, setWriteDistributionAndOrdering, addPartitionField,
+          dropPartitionField, replacePartitionField, setIdentifierFields,
+          dropIdentifierFields);
     } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
       throw new NoSuchTableException(ident);
     }
@@ -407,9 +444,16 @@ public class SparkCatalog extends BaseCatalog {
     return catalogName;
   }
 
+  @SuppressWarnings("checkstyle:CyclomaticComplexity")
   private static void commitChanges(Table table, SetProperty setLocation, SetProperty setSnapshotId,
                                     SetProperty pickSnapshotId, List<TableChange> propertyChanges,
-                                    List<TableChange> schemaChanges) {
+                                    List<TableChange> schemaChanges,
+                                    SetWriteDistributionAndOrdering setWriteDistributionAndOrdering,
+                                    AddPartitionField addPartitionField,
+                                    DropPartitionField dropPartitionField,
+                                    ReplacePartitionField replacePartitionField,
+                                    SetIdentifierFields setIdentifierFields,
+                                    DropIdentifierFields dropIdentifierFields) {
     // don't allow setting the snapshot and picking a commit at the same time because order is ambiguous and choosing
     // one order leads to different results
     Preconditions.checkArgument(setSnapshotId == null || pickSnapshotId == null,
@@ -431,6 +475,92 @@ public class SparkCatalog extends BaseCatalog {
     if (setLocation != null) {
       transaction.updateLocation()
           .setLocation(setLocation.value())
+          .commit();
+    }
+
+    if (setWriteDistributionAndOrdering != null) {
+      ReplaceSortOrder replaceSortOrder = transaction.replaceSortOrder();
+      Spark3Util.rebuildSortOrder(replaceSortOrder, setWriteDistributionAndOrdering.ordering());
+      replaceSortOrder.commit();
+
+      String distributionModeName = setWriteDistributionAndOrdering.distributionMode();
+      DistributionMode distributionMode = DistributionMode.fromName(distributionModeName);
+      transaction.updateProperties()
+          .set(WRITE_DISTRIBUTION_MODE, distributionMode.modeName())
+          .commit();
+    }
+
+    if (addPartitionField != null) {
+      transaction.updateSpec()
+          .addField(addPartitionField.name(), Spark3Util.convert(addPartitionField.transform()))
+          .commit();
+    }
+
+    if (dropPartitionField != null) {
+      Schema schema = transaction.table().schema();
+      Term term = Spark3Util.convert(dropPartitionField.transform());
+      if (term instanceof NamedReference && schema.findField(((NamedReference<?>) term).name()) == null) {
+        // the name is not present in the Iceberg schema, so it must be a partition field name, not a column name
+        transaction.updateSpec()
+            .removeField(((NamedReference<?>) term).name())
+            .commit();
+
+      } else {
+        transaction.updateSpec()
+            .removeField(term)
+            .commit();
+      }
+    }
+
+    if (replacePartitionField != null) {
+      Schema schema = transaction.table().schema();
+      Transform removedTransform = replacePartitionField.removedTransform();
+      Term removedTerm = Spark3Util.convert(removedTransform);
+      Transform addedTransform = replacePartitionField.addedTransform();
+      Term addedTerm = Spark3Util.convert(addedTransform);
+
+      if (removedTerm instanceof NamedReference && schema.findField(((NamedReference<?>) removedTerm).name()) == null) {
+        // the name is not present in the Iceberg schema, so it must be a partition field name, not a column name
+        transaction.updateSpec()
+            .removeField(((NamedReference<?>) removedTerm).name())
+            .addField(replacePartitionField.name(), addedTerm)
+            .commit();
+
+      } else {
+        transaction.updateSpec()
+            .removeField(Spark3Util.convert(removedTransform))
+            .addField(replacePartitionField.name(), addedTerm)
+            .commit();
+      }
+    }
+
+    if (setIdentifierFields != null) {
+      List<String> fieldNames = Arrays.stream(setIdentifierFields.fieldReferences())
+          .map(Spark3Util::convert)
+          .map(term -> ((NamedReference<?>) term).name())
+          .collect(Collectors.toList());
+      transaction.updateSchema()
+          .setIdentifierFields(fieldNames)
+          .commit();
+    }
+
+    if (dropIdentifierFields != null) {
+      Schema schema = transaction.table().schema();
+      Set<String> identifierFieldNames = Sets.newHashSet(schema.identifierFieldNames());
+
+      Arrays.stream(dropIdentifierFields.fieldNames())
+          .map(Spark3Util::convert)
+          .forEach(term -> {
+            String name = ((NamedReference<?>) term).name();
+            Preconditions.checkArgument(schema.findField(name) != null,
+                "Cannot complete drop identifier fields operation: field %s not found", name);
+            Preconditions.checkArgument(identifierFieldNames.contains(name),
+                "Cannot complete drop identifier fields operation: %s is not an identifier field", name);
+            identifierFieldNames.remove(name);
+          });
+
+      transaction.updateSchema()
+          .setIdentifierFields(identifierFieldNames)
           .commit();
     }
 

@@ -22,7 +22,6 @@ package org.apache.iceberg.spark.extensions;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
-import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.expressions.Expression;
@@ -30,7 +29,6 @@ import org.apache.spark.sql.catalyst.expressions.Literal;
 import org.apache.spark.sql.catalyst.expressions.Literal$;
 import org.apache.spark.sql.catalyst.parser.ParseException;
 import org.apache.spark.sql.catalyst.parser.ParserInterface;
-import org.apache.spark.sql.catalyst.parser.extensions.IcebergParseException;
 import org.apache.spark.sql.catalyst.plans.logical.CallArgument;
 import org.apache.spark.sql.catalyst.plans.logical.CallStatement;
 import org.apache.spark.sql.catalyst.plans.logical.NamedArgument;
@@ -128,13 +126,6 @@ public class TestCallStatementParser {
     Assert.assertEquals(1, call.args().size());
 
     checkArg(call, 0, "value", DataTypes.StringType);
-  }
-
-  @Test
-  public void testCallParseError() {
-    AssertHelpers.assertThrows("Should fail with a sensible parse error", IcebergParseException.class,
-        "missing '(' at 'radish'",
-        () -> parser.parsePlan("CALL cat.system radish kebab"));
   }
 
   private void checkArg(CallStatement call, int index, Object expectedValue, DataType expectedType) {

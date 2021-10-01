@@ -76,6 +76,22 @@ public abstract class TestDelete extends SparkRowLevelOperationsTestBase {
   }
 
   @Test
+  public void testDeleteWithFalseCondition() {
+    createAndInitUnpartitionedTable();
+
+    sql("INSERT INTO TABLE %s VALUES (1, 'hr'), (2, 'hardware')", tableName);
+
+    sql("DELETE FROM %s WHERE id = 1 AND id > 20", tableName);
+
+    Table table = validationCatalog.loadTable(tableIdent);
+    Assert.assertEquals("Should have 2 snapshots", 2, Iterables.size(table.snapshots()));
+
+    assertEquals("Should have expected rows",
+        ImmutableList.of(row(1, "hr"), row(2, "hardware")),
+        sql("SELECT * FROM %s ORDER BY id", tableName));
+  }
+
+  @Test
   public void testDeleteFromEmptyTable() {
     createAndInitUnpartitionedTable();
 
@@ -304,7 +320,7 @@ public abstract class TestDelete extends SparkRowLevelOperationsTestBase {
     validateSnapshot(currentSnapshot, "delete", "1", "1", null);
   }
 
-  @Ignore // TODO: fails due to SPARK-33267
+  @Test
   public void testDeleteWithInAndNotInConditions() {
     createAndInitUnpartitionedTable();
 
@@ -420,7 +436,7 @@ public abstract class TestDelete extends SparkRowLevelOperationsTestBase {
         sql("SELECT * FROM %s ORDER BY id ASC NULLS LAST", tableName));
   }
 
-  @Ignore // TODO: not supported since SPARK-25154 fix is not yet available
+  @Test
   public void testDeleteWithNotInSubquery() throws NoSuchTableException {
     createAndInitUnpartitionedTable();
 
@@ -463,19 +479,6 @@ public abstract class TestDelete extends SparkRowLevelOperationsTestBase {
     assertEquals("Should have expected rows",
         ImmutableList.of(),
         sql("SELECT * FROM %s ORDER BY id ASC NULLS LAST", tableName));
-  }
-
-  @Test
-  public void testDeleteWithNotInSubqueryNotSupported() throws NoSuchTableException {
-    createAndInitUnpartitionedTable();
-
-    append(new Employee(1, "hr"), new Employee(2, "hardware"));
-
-    createOrReplaceView("deleted_id", Arrays.asList(-1, -2, null), Encoders.INT());
-
-    AssertHelpers.assertThrows("Should complain about NOT IN subquery",
-        AnalysisException.class, "Null-aware predicate subqueries are not currently supported",
-        () -> sql("DELETE FROM %s WHERE id NOT IN (SELECT * FROM deleted_id)", tableName));
   }
 
   @Test
@@ -547,7 +550,8 @@ public abstract class TestDelete extends SparkRowLevelOperationsTestBase {
         sql("SELECT * FROM %s ORDER BY id ASC NULLS LAST", tableName));
   }
 
-  @Test
+  // TODO: temporarily ignore until Spark supports AQE and DPP with aggregates
+  @Ignore
   public void testDeleteWithScalarSubquery() throws NoSuchTableException {
     createAndInitUnpartitionedTable();
 

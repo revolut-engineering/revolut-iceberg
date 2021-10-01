@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.MetadataColumns;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
@@ -37,13 +38,18 @@ import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.SparkReadOptions;
 import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.TableScanUtil;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.sql.connector.iceberg.read.SupportsFileFilter;
+import org.apache.spark.sql.connector.expressions.Expressions;
+import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.read.Statistics;
+import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering;
+import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.sources.In;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 import static org.apache.iceberg.TableProperties.SPLIT_LOOKBACK;
@@ -53,11 +59,8 @@ import static org.apache.iceberg.TableProperties.SPLIT_OPEN_FILE_COST_DEFAULT;
 import static org.apache.iceberg.TableProperties.SPLIT_SIZE;
 import static org.apache.iceberg.TableProperties.SPLIT_SIZE_DEFAULT;
 
-class SparkMergeScan extends SparkBatchScan implements SupportsFileFilter {
+class SparkCopyOnWriteScan extends SparkBatchScan implements SupportsRuntimeFiltering {
 
-  private final Table table;
-  private final boolean ignoreResiduals;
-  private final Schema expectedSchema;
   private final Long snapshotId;
   private final Long splitSize;
   private final Integer splitLookback;
@@ -68,14 +71,10 @@ class SparkMergeScan extends SparkBatchScan implements SupportsFileFilter {
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
   private Set<String> filteredLocations = null;
 
-  SparkMergeScan(SparkSession spark, Table table, boolean caseSensitive, boolean ignoreResiduals,
-                 Schema expectedSchema, List<Expression> filters, CaseInsensitiveStringMap options) {
+  SparkCopyOnWriteScan(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
+                       List<Expression> filters, CaseInsensitiveStringMap options) {
 
     super(spark, table, caseSensitive, expectedSchema, filters, options);
-
-    this.table = table;
-    this.ignoreResiduals = ignoreResiduals;
-    this.expectedSchema = expectedSchema;
 
     Map<String, String> props = table.properties();
 
@@ -108,30 +107,47 @@ class SparkMergeScan extends SparkBatchScan implements SupportsFileFilter {
   }
 
   @Override
-  public void filterFiles(Set<String> locations) {
-    // invalidate cached tasks to trigger split planning again
-    tasks = null;
-    filteredLocations = locations;
-    files = files().stream()
-        .filter(file -> filteredLocations.contains(file.file().path().toString()))
-        .collect(Collectors.toList());
+  public NamedReference[] filterAttributes() {
+    return new NamedReference[] { Expressions.column(MetadataColumns.FILE_PATH.name()) };
+  }
+
+  @Override
+  public void filter(Filter[] filters) {
+    for (Filter filter : filters) {
+      if (filter instanceof In && ((In) filter).attribute().equalsIgnoreCase(MetadataColumns.FILE_PATH.name())) {
+        In in = (In) filter;
+
+        Set<String> fileLocations = Sets.newHashSet();
+        for (Object value : in.values()) {
+          fileLocations.add((String) value);
+        }
+
+        // Spark may call this multiple times for UPDATEs with subqueries
+        // as such cases are rewritten using UNION and the same scan on both sides
+        // so filter files only if it is beneficial
+        if (fileLocations.size() < filteredLocations.size()) {
+          this.tasks = null;
+          this.filteredLocations = fileLocations;
+          this.files = files().stream()
+              .filter(file -> fileLocations.contains(file.file().path().toString()))
+              .collect(Collectors.toList());
+        }
+      }
+    }
   }
 
   // should be accessible to the write
   synchronized List<FileScanTask> files() {
     if (files == null) {
-      TableScan scan = table
+      TableScan scan = table()
           .newScan()
+          .ignoreResiduals()
           .caseSensitive(caseSensitive())
           .useSnapshot(snapshotId)
-          .project(expectedSchema);
+          .project(expectedSchema());
 
       for (Expression filter : filterExpressions()) {
         scan = scan.filter(filter);
-      }
-
-      if (ignoreResiduals) {
-        scan = scan.ignoreResiduals();
       }
 
       try (CloseableIterable<FileScanTask> filesIterable = scan.planFiles()) {
@@ -169,11 +185,10 @@ class SparkMergeScan extends SparkBatchScan implements SupportsFileFilter {
       return false;
     }
 
-    SparkMergeScan that = (SparkMergeScan) o;
+    SparkCopyOnWriteScan that = (SparkCopyOnWriteScan) o;
     return table().name().equals(that.table().name()) &&
         readSchema().equals(that.readSchema()) && // compare Spark schemas to ignore field ids
         filterExpressions().toString().equals(that.filterExpressions().toString()) &&
-        ignoreResiduals == that.ignoreResiduals &&
         Objects.equals(snapshotId, that.snapshotId) &&
         Objects.equals(filteredLocations, that.filteredLocations);
   }
@@ -182,13 +197,13 @@ class SparkMergeScan extends SparkBatchScan implements SupportsFileFilter {
   public int hashCode() {
     return Objects.hash(
         table().name(), readSchema(), filterExpressions().toString(),
-        ignoreResiduals, snapshotId, filteredLocations);
+        snapshotId, filteredLocations);
   }
 
   @Override
   public String toString() {
     return String.format(
-        "IcebergMergeScan(table=%s, type=%s, filters=%s, caseSensitive=%s)",
+        "IcebergCopyOnWriteScan(table=%s, type=%s, filters=%s, caseSensitive=%s)",
         table(), expectedSchema().asStruct(), filterExpressions(), caseSensitive());
   }
 }

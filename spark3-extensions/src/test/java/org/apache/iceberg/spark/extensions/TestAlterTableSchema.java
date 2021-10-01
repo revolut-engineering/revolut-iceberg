@@ -23,6 +23,8 @@ import java.util.Map;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
+import org.apache.spark.SparkException;
+import org.apache.spark.sql.AnalysisException;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
@@ -71,12 +73,12 @@ public class TestAlterTableSchema extends SparkExtensionsTestBase {
     Table table = validationCatalog.loadTable(tableIdent);
     Assert.assertTrue("Table should start without identifier", table.schema().identifierFieldIds().isEmpty());
     AssertHelpers.assertThrows("should not allow setting unknown fields",
-        IllegalArgumentException.class,
-        "not found in current schema or added columns",
+        AnalysisException.class,
+        "Missing field",
         () -> sql("ALTER TABLE %s SET IDENTIFIER FIELDS unknown", tableName));
 
     AssertHelpers.assertThrows("should not allow setting optional fields",
-        IllegalArgumentException.class,
+        SparkException.class,
         "not a required field",
         () -> sql("ALTER TABLE %s SET IDENTIFIER FIELDS id2", tableName));
   }
@@ -124,18 +126,18 @@ public class TestAlterTableSchema extends SparkExtensionsTestBase {
     Table table = validationCatalog.loadTable(tableIdent);
     Assert.assertTrue("Table should start without identifier", table.schema().identifierFieldIds().isEmpty());
     AssertHelpers.assertThrows("should not allow dropping unknown fields",
-        IllegalArgumentException.class,
-        "field unknown not found",
+        AnalysisException.class,
+        "Missing field",
         () -> sql("ALTER TABLE %s DROP IDENTIFIER FIELDS unknown", tableName));
 
     sql("ALTER TABLE %s SET IDENTIFIER FIELDS id", tableName);
     AssertHelpers.assertThrows("should not allow dropping a field that is not an identifier",
-        IllegalArgumentException.class,
+        SparkException.class,
         "data is not an identifier field",
         () -> sql("ALTER TABLE %s DROP IDENTIFIER FIELDS data", tableName));
 
     AssertHelpers.assertThrows("should not allow dropping a nested field that is not an identifier",
-        IllegalArgumentException.class,
+        SparkException.class,
         "location.lon is not an identifier field",
         () -> sql("ALTER TABLE %s DROP IDENTIFIER FIELDS location.lon", tableName));
   }

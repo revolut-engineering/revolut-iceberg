@@ -48,9 +48,9 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import static org.apache.iceberg.TableProperties.MERGE_CARDINALITY_CHECK_ENABLED;
 import static org.apache.iceberg.TableProperties.MERGE_ISOLATION_LEVEL;
 import static org.apache.iceberg.TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES;
 import static org.apache.iceberg.TableProperties.SPLIT_SIZE;
@@ -292,7 +292,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         "{ \"id\": 6, \"dep\": \"emp-id-6\" }");
 
     String errorMsg = "a single row from the target table with multiple rows of the source table";
-    AssertHelpers.assertThrows("Should complain non iceberg target table",
+    AssertHelpers.assertThrowsCause("Should complain non iceberg target table",
         SparkException.class, errorMsg,
         () -> {
           sql("MERGE INTO %s AS t USING source AS s " +
@@ -307,39 +307,6 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
 
     assertEquals("Target should be unchanged",
         ImmutableList.of(row(1, "emp-id-one"), row(6, "emp-id-6")),
-        sql("SELECT * FROM %s ORDER BY id ASC NULLS LAST", tableName));
-  }
-
-  @Test
-  public void testMergeWithDisabledCardinalityCheck() {
-    createAndInitTable("id INT, dep STRING",
-        "{ \"id\": 1, \"dep\": \"emp-id-one\" }\n" +
-        "{ \"id\": 6, \"dep\": \"emp-id-6\" }");
-
-    createOrReplaceView("source", "id INT, dep STRING",
-        "{ \"id\": 1, \"dep\": \"emp-id-1\" }\n" +
-         "{ \"id\": 1, \"dep\": \"emp-id-1\" }\n" +
-         "{ \"id\": 2, \"dep\": \"emp-id-2\" }\n" +
-         "{ \"id\": 6, \"dep\": \"emp-id-6\" }");
-
-    try {
-      // disable the cardinality check
-      sql("ALTER TABLE %s SET TBLPROPERTIES('%s' '%b')", tableName, MERGE_CARDINALITY_CHECK_ENABLED, false);
-
-      sql("MERGE INTO %s AS t USING source AS s " +
-          "ON t.id == s.id " +
-          "WHEN MATCHED AND t.id = 1 THEN " +
-          "  UPDATE SET * " +
-          "WHEN MATCHED AND t.id = 6 THEN " +
-          "  DELETE " +
-          "WHEN NOT MATCHED AND s.id = 2 THEN " +
-          "  INSERT *", tableName);
-    } finally {
-      sql("ALTER TABLE %s SET TBLPROPERTIES('%s' '%b')", tableName, MERGE_CARDINALITY_CHECK_ENABLED, true);
-    }
-
-    assertEquals("Should have expected rows",
-        ImmutableList.of(row(1, "emp-id-1"), row(1, "emp-id-1"), row(2, "emp-id-2")),
         sql("SELECT * FROM %s ORDER BY id ASC NULLS LAST", tableName));
   }
 
@@ -381,7 +348,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         "{ \"id\": 6, \"dep\": \"emp-id-6\" }");
 
     String errorMsg = "a single row from the target table with multiple rows of the source table";
-    AssertHelpers.assertThrows("Should complain non iceberg target table",
+    AssertHelpers.assertThrowsCause("Should complain non iceberg target table",
         SparkException.class, errorMsg,
         () -> {
           sql("MERGE INTO %s AS t USING source AS s " +
@@ -432,7 +399,8 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  @Test
+  // TODO: temporarily ignore until Spark supports Iceberg transforms
+  @Ignore
   public void testMergeWithDaysTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, ts TIMESTAMP");
@@ -469,7 +437,8 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  @Test
+  // TODO: temporarily ignore until Spark supports Iceberg transforms
+  @Ignore
   public void testMergeWithBucketTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, dep STRING");
@@ -504,7 +473,8 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  @Test
+  // TODO: temporarily ignore until Spark supports Iceberg transforms
+  @Ignore
   public void testMergeWithTruncateTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, dep STRING");
@@ -1097,7 +1067,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     createOrReplaceView("source", "{ \"c1\": -100, \"c2\": -200 }");
 
     AssertHelpers.assertThrows("Should complain about the invalid top-level column",
-        AnalysisException.class, "cannot resolve '`t.invalid_col`'",
+        AnalysisException.class, "cannot resolve t.invalid_col",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1115,7 +1085,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         });
 
     AssertHelpers.assertThrows("Should complain about the invalid top-level column",
-        AnalysisException.class, "cannot resolve '`invalid_col`'",
+        AnalysisException.class, "cannot resolve invalid_col",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1168,14 +1138,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     createAndInitTable("id INT, a ARRAY<STRUCT<c1:INT,c2:INT>>, m MAP<STRING,STRING>");
     createOrReplaceView("source", "{ \"c1\": -100, \"c2\": -200 }");
 
-    AssertHelpers.assertThrows("Should complain about updating an array column",
-        AnalysisException.class, "Updating nested fields is only supported for structs",
-        () -> {
-          sql("MERGE INTO %s t USING source s " +
-              "ON t.id == s.c1 " +
-              "WHEN MATCHED THEN " +
-              "  UPDATE SET t.a.c1 = s.c2", tableName);
-        });
+    // Spark changed resolution logic and updating a nested field in an array is no longer valid
 
     AssertHelpers.assertThrows("Should complain about updating a map column",
         AnalysisException.class, "Updating nested fields is only supported for structs",
@@ -1285,7 +1248,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     createOrReplaceView("source", "{ \"c1\": -100, \"c2\": -200 }");
 
     AssertHelpers.assertThrows("Should complain about non-deterministic search conditions",
-        AnalysisException.class, "nondeterministic expressions are only allowed in",
+        AnalysisException.class, "Non-deterministic functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 AND rand() > t.id " +
@@ -1294,7 +1257,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         });
 
     AssertHelpers.assertThrows("Should complain about non-deterministic update conditions",
-        AnalysisException.class, "nondeterministic expressions are only allowed in",
+        AnalysisException.class, "Non-deterministic functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1303,7 +1266,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         });
 
     AssertHelpers.assertThrows("Should complain about non-deterministic delete conditions",
-        AnalysisException.class, "nondeterministic expressions are only allowed in",
+        AnalysisException.class, "Non-deterministic functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1312,7 +1275,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         });
 
     AssertHelpers.assertThrows("Should complain about non-deterministic insert conditions",
-        AnalysisException.class, "nondeterministic expressions are only allowed in",
+        AnalysisException.class, "Non-deterministic functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1327,7 +1290,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     createOrReplaceView("source", "{ \"c1\": -100, \"c2\": -200 }");
 
     AssertHelpers.assertThrows("Should complain about agg expressions in search conditions",
-        AnalysisException.class, "contains one or more unsupported",
+        AnalysisException.class, "Agg functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 AND max(t.id) == 1 " +
@@ -1336,7 +1299,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
         });
 
     AssertHelpers.assertThrows("Should complain about agg expressions in update conditions",
-        AnalysisException.class, "contains one or more unsupported",
+        AnalysisException.class, "Agg functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1344,8 +1307,8 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
               "  UPDATE SET t.c.n1 = -1", tableName);
         });
 
-    AssertHelpers.assertThrows("Should complain about non-deterministic delete conditions",
-        AnalysisException.class, "contains one or more unsupported",
+    AssertHelpers.assertThrows("Should complain about agg expressions in delete conditions",
+        AnalysisException.class, "Agg functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1353,8 +1316,8 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
               "  DELETE", tableName);
         });
 
-    AssertHelpers.assertThrows("Should complain about non-deterministic insert conditions",
-        AnalysisException.class, "contains one or more unsupported",
+    AssertHelpers.assertThrows("Should complain about agg expressions in insert conditions",
+        AnalysisException.class, "Agg functions are not supported",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.c1 " +
@@ -1411,7 +1374,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     createOrReplaceView("source", "{ \"id\": 1, \"value\": 11 }");
 
     AssertHelpers.assertThrows("Should complain about the target column",
-        AnalysisException.class, "cannot resolve '`c2`'",
+        AnalysisException.class, "cannot resolve 'c2'",
         () -> {
           sql("MERGE INTO %s t USING source s " +
               "ON t.id == s.id " +

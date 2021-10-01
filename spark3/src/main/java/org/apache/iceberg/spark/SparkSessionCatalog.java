@@ -277,7 +277,7 @@ public class SparkSessionCatalog<T extends TableCatalog & SupportsNamespaces>
     return catalogName;
   }
 
-  private boolean useIceberg(String provider) {
+  public boolean useIceberg(String provider) {
     if (provider == null || "iceberg".equalsIgnoreCase(provider)) {
       return true;
     } else if (createParquetAsIceberg && "parquet".equalsIgnoreCase(provider)) {

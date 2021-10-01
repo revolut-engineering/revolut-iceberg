@@ -17,18 +17,21 @@
  * under the License.
  */
 
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.iceberg;
 
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.util.truncatedString
-import org.apache.spark.sql.connector.iceberg.catalog.Procedure
-import scala.collection.Seq
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
-case class Call(procedure: Procedure, args: Seq[Expression]) extends Command {
-  override lazy val output: Seq[Attribute] = procedure.outputType.toAttributes
+public enum RowLevelOperationMode {
+  COPY_ON_WRITE, MERGE_ON_READ;
 
-  override def simpleString(maxFields: Int): String = {
-    s"Call${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
+  public static RowLevelOperationMode fromName(String modeName) {
+    Preconditions.checkArgument(modeName != null, "Mode name is null");
+    if ("copy-on-write".equalsIgnoreCase(modeName)) {
+      return COPY_ON_WRITE;
+    } else if ("merge-on-read".equalsIgnoreCase(modeName)) {
+      return MERGE_ON_READ;
+    } else {
+      throw new IllegalArgumentException("Unknown row-level operation mode: " + modeName);
+    }
   }
 }

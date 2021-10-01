@@ -58,7 +58,6 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
   private boolean caseSensitive;
   private List<Expression> filterExpressions = null;
   private Filter[] pushedFilters = NO_FILTERS;
-  private boolean ignoreResiduals = false;
 
   SparkScanBuilder(SparkSession spark, Table table, CaseInsensitiveStringMap options) {
     this.spark = spark;
@@ -140,11 +139,6 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
         .forEach(metaColumns::add);
   }
 
-  public SparkScanBuilder ignoreResiduals() {
-    this.ignoreResiduals = true;
-    return this;
-  }
-
   private Schema schemaWithMetadataColumns() {
     // metadata columns
     List<Types.NestedField> fields = metaColumns.stream()
@@ -163,9 +157,8 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
         spark, table, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
   }
 
-  public Scan buildMergeScan() {
-    return new SparkMergeScan(
-        spark, table, caseSensitive, ignoreResiduals,
-        schemaWithMetadataColumns(), filterExpressions, options);
+  public Scan buildCopyOnWriteScan() {
+    return new SparkCopyOnWriteScan(
+        spark, table, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
   }
 }

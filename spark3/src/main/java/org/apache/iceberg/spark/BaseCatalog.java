@@ -23,10 +23,10 @@ import org.apache.iceberg.spark.procedures.SparkProcedures;
 import org.apache.iceberg.spark.procedures.SparkProcedures.ProcedureBuilder;
 import org.apache.spark.sql.catalyst.analysis.NoSuchProcedureException;
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.Procedure;
+import org.apache.spark.sql.connector.catalog.ProcedureCatalog;
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
-import org.apache.spark.sql.connector.iceberg.catalog.Procedure;
-import org.apache.spark.sql.connector.iceberg.catalog.ProcedureCatalog;
 
 abstract class BaseCatalog implements StagingTableCatalog, ProcedureCatalog, SupportsNamespaces {
 

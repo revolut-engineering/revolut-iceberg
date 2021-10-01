@@ -20,38 +20,12 @@
 package org.apache.iceberg.spark.extensions
 
 import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.analysis.AlignRowLevelOperations
-import org.apache.spark.sql.catalyst.analysis.ProcedureArgumentCoercion
-import org.apache.spark.sql.catalyst.analysis.ResolveProcedures
-import org.apache.spark.sql.catalyst.analysis.RowLevelOperationsPredicateCheck
-import org.apache.spark.sql.catalyst.optimizer.OptimizeConditionsInRowLevelOperations
-import org.apache.spark.sql.catalyst.optimizer.PullupCorrelatedPredicatesInRowLevelOperations
-import org.apache.spark.sql.catalyst.optimizer.RewriteDelete
-import org.apache.spark.sql.catalyst.optimizer.RewriteMergeInto
-import org.apache.spark.sql.catalyst.optimizer.RewriteUpdate
-import org.apache.spark.sql.catalyst.parser.extensions.IcebergSparkSqlExtensionsParser
-import org.apache.spark.sql.execution.datasources.v2.ExtendedDataSourceV2Strategy
+import org.slf4j.LoggerFactory
 
 class IcebergSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
+  private val LOG = LoggerFactory.getLogger(this.getClass)
 
   override def apply(extensions: SparkSessionExtensions): Unit = {
-    // parser extensions
-    extensions.injectParser { case (_, parser) => new IcebergSparkSqlExtensionsParser(parser) }
-
-    // analyzer extensions
-    extensions.injectResolutionRule { spark => ResolveProcedures(spark) }
-    extensions.injectResolutionRule { _ => ProcedureArgumentCoercion }
-    extensions.injectPostHocResolutionRule { spark => AlignRowLevelOperations }
-    extensions.injectCheckRule { _ => RowLevelOperationsPredicateCheck }
-
-    // optimizer extensions
-    extensions.injectOptimizerRule { _ => OptimizeConditionsInRowLevelOperations }
-    extensions.injectOptimizerRule { _ => PullupCorrelatedPredicatesInRowLevelOperations }
-    extensions.injectOptimizerRule { spark => RewriteDelete(spark) }
-    extensions.injectOptimizerRule { spark => RewriteUpdate(spark) }
-    extensions.injectOptimizerRule { spark => RewriteMergeInto(spark) }
-
-    // planner extensions
-    extensions.injectPlannerStrategy { spark => ExtendedDataSourceV2Strategy(spark) }
+    LOG.warn("{} is set as an extension to Spark but this is not required with Apple Spark", this.getClass.getName)
   }
 }

@@ -140,7 +140,7 @@ public abstract class IcebergSourceBenchmark {
     });
 
     conf.forEach((confKey, confValue) -> {
-      if (SQLConf.staticConfKeys().contains(confKey)) {
+      if (!confKey.startsWith("spark.sql.iceberg") && !sqlConf.isModifiable(confKey)) {
         throw new RuntimeException("Cannot modify the value of a static config: " + confKey);
       }
       sqlConf.setConfString(confKey, confValue);

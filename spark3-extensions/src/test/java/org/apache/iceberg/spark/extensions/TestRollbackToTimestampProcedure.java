@@ -234,6 +234,39 @@ public class TestRollbackToTimestampProcedure extends SparkExtensionsTestBase {
   }
 
   @Test
+  public void testRollbackWithExpression() throws InterruptedException {
+    sql("CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg", tableName);
+    sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
+
+    Table table = validationCatalog.loadTable(tableIdent);
+    Snapshot firstSnapshot = table.currentSnapshot();
+
+    Thread.sleep(3000);
+
+    sql("INSERT INTO TABLE %s VALUES (1, 'a')", tableName);
+
+    assertEquals("Should have expected rows",
+        ImmutableList.of(row(1L, "a"), row(1L, "a")),
+        sql("SELECT * FROM %s ORDER BY id", tableName));
+
+    table.refresh();
+
+    Snapshot secondSnapshot = table.currentSnapshot();
+
+    List<Object[]> output = sql(
+        "CALL %s.system.rollback_to_timestamp('%s', NOW() - INTERVAL '2' SECONDS)",
+        catalogName, tableIdent);
+
+    assertEquals("Procedure output must match",
+        ImmutableList.of(row(secondSnapshot.snapshotId(), firstSnapshot.snapshotId())),
+        output);
+
+    assertEquals("Rollback must be successful",
+        ImmutableList.of(row(1L, "a")),
+        sql("SELECT * FROM %s ORDER BY id", tableName));
+  }
+
+  @Test
   public void testInvalidRollbackToTimestampCases() {
     String timestamp = "TIMESTAMP '2007-12-03T10:15:30'";
 

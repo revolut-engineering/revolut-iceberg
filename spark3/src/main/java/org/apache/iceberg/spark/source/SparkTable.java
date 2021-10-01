@@ -21,6 +21,8 @@ package org.apache.iceberg.spark.source;
 
 import java.util.Map;
 import java.util.Set;
+import org.apache.iceberg.MetadataColumns;
+import org.apache.iceberg.Partitioning;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
@@ -34,34 +36,31 @@ import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.SparkFilters;
 import org.apache.iceberg.spark.SparkReadOptions;
 import org.apache.iceberg.spark.SparkSchemaUtil;
-import org.apache.iceberg.spark.SparkWriteOptions;
 import org.apache.iceberg.types.Types;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.connector.catalog.MetadataColumn;
+import org.apache.spark.sql.connector.catalog.SupportsDelete;
+import org.apache.spark.sql.connector.catalog.SupportsMetadataColumns;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
+import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.expressions.Transform;
-import org.apache.spark.sql.connector.iceberg.catalog.ExtendedSupportsDelete;
-import org.apache.spark.sql.connector.iceberg.catalog.SupportsMerge;
-import org.apache.spark.sql.connector.iceberg.write.MergeBuilder;
 import org.apache.spark.sql.connector.read.ScanBuilder;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
+import org.apache.spark.sql.connector.write.RowLevelOperationBuilder;
+import org.apache.spark.sql.connector.write.RowLevelOperationInfo;
 import org.apache.spark.sql.connector.write.WriteBuilder;
 import org.apache.spark.sql.sources.Filter;
+import org.apache.spark.sql.types.DataType;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.iceberg.TableProperties.DELETE_MODE;
-import static org.apache.iceberg.TableProperties.DELETE_MODE_DEFAULT;
-import static org.apache.iceberg.TableProperties.MERGE_MODE;
-import static org.apache.iceberg.TableProperties.MERGE_MODE_DEFAULT;
-import static org.apache.iceberg.TableProperties.UPDATE_MODE;
-import static org.apache.iceberg.TableProperties.UPDATE_MODE_DEFAULT;
-
 public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
-    SupportsRead, SupportsWrite, ExtendedSupportsDelete, SupportsMerge {
+    SupportsRead, SupportsWrite, SupportsDelete, SupportsRowLevelOperations, SupportsMetadataColumns {
 
   private static final Logger LOG = LoggerFactory.getLogger(SparkTable.class);
 
@@ -161,6 +160,17 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
   }
 
   @Override
+  public MetadataColumn[] metadataColumns() {
+    DataType sparkPartitionType = SparkSchemaUtil.convert(Partitioning.partitionType(table()));
+    return new MetadataColumn[] {
+        new SparkMetadataColumn(MetadataColumns.SPEC_ID.name(), DataTypes.IntegerType, false),
+        new SparkMetadataColumn(MetadataColumns.PARTITION_COLUMN_NAME, sparkPartitionType, true),
+        new SparkMetadataColumn(MetadataColumns.FILE_PATH.name(), DataTypes.StringType, false),
+        new SparkMetadataColumn(MetadataColumns.ROW_POSITION.name(), DataTypes.LongType, false)
+    };
+  }
+
+  @Override
   public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
     if (options.containsKey(SparkReadOptions.FILE_SCAN_TASK_SET_ID)) {
       // skip planning the job and fetch already staged file scan tasks
@@ -182,32 +192,12 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
 
   @Override
   public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-    if (info.options().containsKey(SparkWriteOptions.REWRITTEN_FILE_SCAN_TASK_SET_ID)) {
-      // replace data files in the given file scan task set with new files
-      return new SparkRewriteBuilder(sparkSession(), icebergTable, info);
-    } else {
-      return new SparkWriteBuilder(sparkSession(), icebergTable, info);
-    }
+    return new SparkWriteBuilder(sparkSession(), icebergTable, info);
   }
 
   @Override
-  public MergeBuilder newMergeBuilder(String operation, LogicalWriteInfo info) {
-    String mode = getRowLevelOperationMode(operation);
-    ValidationException.check(mode.equals("copy-on-write"), "Unsupported mode for %s: %s", operation, mode);
-    return new SparkMergeBuilder(sparkSession(), icebergTable, operation, info);
-  }
-
-  private String getRowLevelOperationMode(String operation) {
-    Map<String, String> props = icebergTable.properties();
-    if (operation.equalsIgnoreCase("delete")) {
-      return props.getOrDefault(DELETE_MODE, DELETE_MODE_DEFAULT);
-    } else if (operation.equalsIgnoreCase("update")) {
-      return props.getOrDefault(UPDATE_MODE, UPDATE_MODE_DEFAULT);
-    } else if (operation.equalsIgnoreCase("merge")) {
-      return props.getOrDefault(MERGE_MODE, MERGE_MODE_DEFAULT);
-    } else {
-      throw new IllegalArgumentException("Unsupported operation: " + operation);
-    }
+  public RowLevelOperationBuilder newRowLevelOperationBuilder(RowLevelOperationInfo info) {
+    return new SparkRowLevelOperationBuilder(sparkSession(), icebergTable, info);
   }
 
   @Override
@@ -282,5 +272,33 @@ public class SparkTable implements org.apache.spark.sql.connector.catalog.Table,
   public int hashCode() {
     // use only name in order to correctly invalidate Spark cache
     return icebergTable.name().hashCode();
+  }
+
+  private static class SparkMetadataColumn implements MetadataColumn {
+
+    private final String name;
+    private final DataType dataType;
+    private final boolean isNullable;
+
+    private SparkMetadataColumn(String name, DataType dataType, boolean isNullable) {
+      this.name = name;
+      this.dataType = dataType;
+      this.isNullable = isNullable;
+    }
+
+    @Override
+    public String name() {
+      return name;
+    }
+
+    @Override
+    public DataType dataType() {
+      return dataType;
+    }
+
+    @Override
+    public boolean isNullable() {
+      return isNullable;
+    }
   }
 }
