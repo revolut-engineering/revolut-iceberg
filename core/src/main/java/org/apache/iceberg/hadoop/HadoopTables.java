@@ -42,6 +42,8 @@ import org.apache.iceberg.Transactions;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
+import org.apache.iceberg.metrics.CoreMetricsUtil;
+import org.apache.iceberg.metrics.CoreMetricsUtil.TableOperationsMetricType;
 import org.apache.iceberg.relocated.com.google.common.annotations.VisibleForTesting;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
@@ -192,9 +194,11 @@ public class HadoopTables implements Tables, Configurable {
   @VisibleForTesting
   TableOperations newTableOps(String location) {
     if (location.contains(METADATA_JSON)) {
-      return new StaticTableOperations(location, new HadoopFileIO(conf));
+      TableOperations tableOps = new StaticTableOperations(location, new HadoopFileIO(conf));
+      return CoreMetricsUtil.wrapWithMeterIfConfigured(conf, TableOperationsMetricType.STATIC, tableOps);
     } else {
-      return new HadoopTableOperations(new Path(location), new HadoopFileIO(conf), conf);
+      TableOperations tableOps = new HadoopTableOperations(new Path(location), new HadoopFileIO(conf), conf);
+      return CoreMetricsUtil.wrapWithMeterIfConfigured(conf, TableOperationsMetricType.HADOOP, tableOps);
     }
   }
 

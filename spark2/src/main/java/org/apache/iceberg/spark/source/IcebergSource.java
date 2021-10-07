@@ -19,6 +19,7 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.codahale.metrics.MetricRegistry;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
@@ -29,6 +30,8 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.spark.SparkUtil;
 import org.apache.iceberg.spark.SparkWriteOptions;
+import org.apache.iceberg.spark.metrics.MeteredReader;
+import org.apache.iceberg.spark.metrics.SparkMetricsUtil;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
@@ -66,7 +69,7 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     Table table = getTableAndResolveHadoopConfiguration(options, conf);
     String caseSensitive = lazySparkSession().conf().get("spark.sql.caseSensitive");
 
-    Reader reader = new Reader(lazySparkSession(), table, Boolean.parseBoolean(caseSensitive), options);
+    Reader reader = createMeteredReader(conf, lazySparkSession(), table, Boolean.parseBoolean(caseSensitive), options);
     if (readSchema != null) {
       // convert() will fail if readSchema contains fields not in table.schema()
       SparkSchemaUtil.convert(table.schema(), readSchema);
@@ -74,6 +77,18 @@ public class IcebergSource implements DataSourceV2, ReadSupport, WriteSupport, D
     }
 
     return reader;
+  }
+
+  private Reader createMeteredReader(Configuration conf, SparkSession spark, Table table,
+                                     boolean caseSensitive, DataSourceOptions options) {
+    Preconditions.checkArgument(conf != null, "Configuration is null");
+
+    if (conf.getBoolean("iceberg.dropwizard.enable-metrics-collection", false)) {
+      MetricRegistry metricRegistry = SparkMetricsUtil.metricRegistry();
+      return new MeteredReader(metricRegistry, spark, table, caseSensitive, options);
+    } else {
+      return new Reader(spark, table, caseSensitive, options);
+    }
   }
 
   @Override

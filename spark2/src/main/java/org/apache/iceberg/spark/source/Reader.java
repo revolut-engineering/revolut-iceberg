@@ -76,7 +76,7 @@ import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class Reader implements DataSourceReader, SupportsScanColumnarBatch, SupportsPushDownFilters,
+public class Reader implements DataSourceReader, SupportsScanColumnarBatch, SupportsPushDownFilters,
     SupportsPushDownRequiredColumns, SupportsReportStatistics {
   private static final Logger LOG = LoggerFactory.getLogger(Reader.class);
 
@@ -108,7 +108,7 @@ class Reader implements DataSourceReader, SupportsScanColumnarBatch, SupportsPus
   private int batchSize = 0;
 
   @SuppressWarnings("checkstyle:CyclomaticComplexity")
-  Reader(SparkSession spark, Table table, boolean caseSensitive, DataSourceOptions options) {
+  public Reader(SparkSession spark, Table table, boolean caseSensitive, DataSourceOptions options) {
     this.sparkContext = JavaSparkContext.fromSparkContext(spark.sparkContext());
     this.table = table;
     this.options = options;

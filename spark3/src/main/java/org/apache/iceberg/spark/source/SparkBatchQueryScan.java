@@ -19,9 +19,12 @@
 
 package org.apache.iceberg.spark.source;
 
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -30,10 +33,13 @@ import org.apache.iceberg.TableScan;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.SparkReadOptions;
+import org.apache.iceberg.spark.metrics.SparkMetricsUtil;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.connector.read.InputPartition;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 class SparkBatchQueryScan extends SparkBatchScan {
@@ -161,5 +167,40 @@ class SparkBatchQueryScan extends SparkBatchScan {
     return String.format(
         "IcebergScan(table=%s, type=%s, filters=%s, caseSensitive=%s)",
         table(), expectedSchema().asStruct(), filterExpressions(), caseSensitive());
+  }
+
+
+  @SuppressWarnings("checkstyle:RegexpSingleline")
+  static SparkBatchQueryScan create(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
+                                    List<Expression> filters, CaseInsensitiveStringMap options) {
+    Configuration conf = spark.sparkContext().hadoopConfiguration();
+    Preconditions.checkArgument(conf != null, "Configuration is null");
+    if (conf.getBoolean("iceberg.dropwizard.enable-metrics-collection", false)) {
+      MetricRegistry metricRegistry = SparkMetricsUtil.metricRegistry();
+      return new MeteredSparkBatchQueryScan(metricRegistry, spark, table, caseSensitive, expectedSchema, filters,
+              options);
+    } else {
+      return new SparkBatchQueryScan(spark, table, caseSensitive, expectedSchema, filters, options);
+    }
+  }
+
+  private static class MeteredSparkBatchQueryScan extends SparkBatchQueryScan {
+    private final MetricRegistry metricRegistry;
+
+    private static final String QUERY_PLAN_TIME = "query.plan.time";
+
+    MeteredSparkBatchQueryScan(MetricRegistry metricRegistry, SparkSession spark, Table table,
+                               boolean caseSensitive, Schema expectedSchema, List<Expression> filters,
+                               CaseInsensitiveStringMap options) {
+      super(spark, table, caseSensitive, expectedSchema, filters, options);
+      this.metricRegistry = metricRegistry;
+    }
+
+    @Override
+    public InputPartition[] planInputPartitions() {
+      try (Timer.Context ctx = metricRegistry.timer(QUERY_PLAN_TIME).time()) {
+        return super.planInputPartitions();
+      }
+    }
   }
 }
