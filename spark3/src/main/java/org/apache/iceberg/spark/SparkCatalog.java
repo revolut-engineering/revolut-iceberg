@@ -30,10 +30,12 @@ import org.apache.iceberg.CachingCatalog;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.DistributionMode;
+import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.ReplaceSortOrder;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
+import org.apache.iceberg.actions.DeleteReachableFiles;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
@@ -50,8 +52,10 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
+import org.apache.iceberg.spark.actions.SparkActions;
 import org.apache.iceberg.spark.source.SparkTable;
 import org.apache.iceberg.spark.source.StagedSparkTable;
+import org.apache.iceberg.util.PropertyUtil;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -74,7 +78,11 @@ import org.apache.spark.sql.connector.catalog.TableChange.SetWriteDistributionAn
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import static org.apache.iceberg.TableProperties.GC_ENABLED;
+import static org.apache.iceberg.TableProperties.GC_ENABLED_DEFAULT;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 
 /**
@@ -93,6 +101,8 @@ import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
  * {@link #buildIcebergCatalog(String, CaseInsensitiveStringMap)}.
  */
 public class SparkCatalog extends BaseCatalog {
+  private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
+
   private static final Set<String> DEFAULT_NS_KEYS = ImmutableSet.of(TableCatalog.PROP_OWNER);
 
   private String catalogName = null;
@@ -272,6 +282,26 @@ public class SparkCatalog extends BaseCatalog {
       return isPathIdentifier(ident) ?
           tables.dropTable(((PathIdentifier) ident).location()) :
           icebergCatalog.dropTable(buildIdentifier(ident));
+    } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
+      return false;
+    }
+  }
+
+  @Override
+  public boolean purgeTable(Identifier identifier) throws UnsupportedOperationException {
+    try {
+      Table table = load(identifier);
+      String metadataFileLocation = ((HasTableOperations) table).operations().current().metadataFileLocation();
+      boolean dropped = isPathIdentifier(identifier) ?
+          tables.dropTable(((PathIdentifier) identifier).location(), false) :
+          icebergCatalog.dropTable(buildIdentifier(identifier), false);
+      if (PropertyUtil.propertyAsBoolean(table.properties(), GC_ENABLED, GC_ENABLED_DEFAULT)) {
+        DeleteReachableFiles removeReachableFiles = SparkActions.get().deleteReachableFiles(metadataFileLocation);
+        removeReachableFiles.io(table.io()).execute();
+      } else {
+        LOG.warn("Table {} was dropped, file were not purged since GC was disabled", identifier.toString());
+      }
+      return dropped;
     } catch (org.apache.iceberg.exceptions.NoSuchTableException e) {
       return false;
     }

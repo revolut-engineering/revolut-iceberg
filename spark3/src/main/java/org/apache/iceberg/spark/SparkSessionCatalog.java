@@ -239,6 +239,11 @@ public class SparkSessionCatalog<T extends TableCatalog & SupportsNamespaces>
   }
 
   @Override
+  public boolean purgeTable(Identifier ident) throws UnsupportedOperationException {
+    return icebergCatalog.purgeTable(ident) || getSessionCatalog().purgeTable(ident);
+  }
+
+  @Override
   public void renameTable(Identifier from, Identifier to) throws NoSuchTableException, TableAlreadyExistsException {
     // rename is not supported by HadoopCatalog. to avoid UnsupportedOperationException for session catalog tables,
     // check table existence first to ensure that the table belongs to the Iceberg catalog.
