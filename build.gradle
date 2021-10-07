@@ -1223,6 +1223,8 @@ project(':iceberg-spark3-runtime') {
 
   configurations {
     implementation {
+      // Including two versions of a JNI-lib can cause many issues and we can't shade this.
+      exclude group: 'com.github.luben' // libzstd
       exclude group: 'org.apache.spark'
       // included in Spark
       exclude group: 'org.slf4j'
