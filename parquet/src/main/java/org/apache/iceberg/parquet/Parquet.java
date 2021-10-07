@@ -785,11 +785,12 @@ public class Parquet {
         ParquetReadOptions.Builder optionsBuilder;
         if (file instanceof HadoopInputFile) {
           // remove read properties already set that may conflict with this read
-          Configuration conf = new Configuration(((HadoopInputFile) file).getConf());
+          HadoopInputFile hadoopFile = (HadoopInputFile) file;
+          Configuration conf = new Configuration(hadoopFile.getConf());
           for (String property : READ_PROPERTIES_TO_REMOVE) {
             conf.unset(property);
           }
-          optionsBuilder = HadoopReadOptions.builder(conf);
+          optionsBuilder = HadoopReadOptions.builder(conf, hadoopFile.getPath());
         } else {
           optionsBuilder = ParquetReadOptions.builder();
         }

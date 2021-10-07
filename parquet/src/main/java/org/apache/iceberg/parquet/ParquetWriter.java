@@ -21,10 +21,12 @@ package org.apache.iceberg.parquet;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.iceberg.Metrics;
 import org.apache.iceberg.MetricsConfig;
 import org.apache.iceberg.Schema;
@@ -39,8 +41,12 @@ import org.apache.parquet.bytes.ByteBufferAllocator;
 import org.apache.parquet.column.ColumnWriteStore;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.page.PageWriteStore;
+import org.apache.parquet.crypto.FileEncryptionProperties;
+import org.apache.parquet.crypto.InternalFileEncryptor;
 import org.apache.parquet.hadoop.CodecFactory;
 import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetOutputFormat;
+import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.schema.MessageType;
 
@@ -52,12 +58,20 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
               CodecFactory.BytesCompressor.class,
               MessageType.class,
               ByteBufferAllocator.class,
+              int.class,
+              boolean.class,
+              InternalFileEncryptor.class,
               int.class)
           .build();
 
   private static final DynMethods.UnboundMethod flushToWriter = DynMethods
       .builder("flushToFileWriter")
       .hiddenImpl("org.apache.parquet.hadoop.ColumnChunkPageWriteStore", ParquetFileWriter.class)
+      .build();
+
+  private static final DynMethods.UnboundMethod getEncryptor = DynMethods
+      .builder("getEncryptor")
+      .hiddenImpl("org.apache.parquet.hadoop.ParquetFileWriter", (Class<?>[]) null)
       .build();
 
   private final long targetRowGroupSize;
@@ -76,6 +90,8 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
   private long recordCount = 0;
   private long nextCheckRecordCount = 10;
   private boolean closed;
+  private InternalFileEncryptor fileEncryptor;
+  private int rowGroupOrdinal;
 
   private static final String COLUMN_INDEX_TRUNCATE_LENGTH = "parquet.columnindex.truncate.length";
   private static final int DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH = 64;
@@ -97,12 +113,21 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
     this.metricsConfig = metricsConfig;
     this.columnIndexTruncateLength = conf.getInt(COLUMN_INDEX_TRUNCATE_LENGTH, DEFAULT_COLUMN_INDEX_TRUNCATE_LENGTH);
 
+    FileEncryptionProperties encryptionProperties = ParquetOutputFormat.createEncryptionProperties(conf,
+            new Path(output.location()), new WriteSupport.WriteContext(parquetSchema, new HashMap<>()));
+    this.rowGroupOrdinal = 0;
+
     try {
       this.writer = new ParquetFileWriter(ParquetIO.file(output, conf), parquetSchema,
-         writeMode, rowGroupSize, 0);
+         writeMode, rowGroupSize, 0, columnIndexTruncateLength,
+              ParquetProperties.DEFAULT_STATISTICS_TRUNCATE_LENGTH,
+              ParquetProperties.DEFAULT_PAGE_WRITE_CHECKSUM_ENABLED,
+              encryptionProperties);
     } catch (IOException e) {
       throw new RuntimeIOException(e, "Failed to create Parquet file");
     }
+
+    this.fileEncryptor = getEncryptor.bind(this.writer).invoke();
 
     try {
       writer.start();
@@ -196,7 +221,9 @@ class ParquetWriter<T> implements FileAppender<T>, Closeable {
     this.recordCount = 0;
 
     PageWriteStore pageStore = pageStoreCtorParquet.newInstance(
-        compressor, parquetSchema, props.getAllocator(), this.columnIndexTruncateLength);
+        compressor, parquetSchema, props.getAllocator(), this.columnIndexTruncateLength, true,
+            this.fileEncryptor, this.rowGroupOrdinal);
+    this.rowGroupOrdinal++;
 
     this.flushPageStoreToWriter = flushToWriter.bind(pageStore);
     this.writeStore = props.newColumnWriteStore(parquetSchema, pageStore);

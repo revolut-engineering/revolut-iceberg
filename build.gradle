@@ -1251,6 +1251,7 @@ project(':iceberg-spark3-runtime') {
     implementation(project(':iceberg-nessie')) {
       exclude group: 'com.google.code.findbugs', module: 'jsr305'
     }
+    implementation "org.apache.parquet:parquet-kms-apple"
   }
 
   shadowJar {
@@ -1273,6 +1274,7 @@ project(':iceberg-spark3-runtime') {
     relocate 'avro.shaded', 'org.apache.iceberg.shaded.org.apache.avro.shaded'
     relocate 'com.thoughtworks.paranamer', 'org.apache.iceberg.shaded.com.thoughtworks.paranamer'
     relocate 'org.apache.parquet', 'org.apache.iceberg.shaded.org.apache.parquet'
+    relocate 'com.apple.parquet', 'org.apache.iceberg.shaded.com.apple.parquet'
     relocate 'shaded.parquet', 'org.apache.iceberg.shaded.org.apache.parquet.shaded'
     relocate 'org.apache.orc', 'org.apache.iceberg.shaded.org.apache.orc'
     relocate 'io.airlift', 'org.apache.iceberg.shaded.io.airlift'
