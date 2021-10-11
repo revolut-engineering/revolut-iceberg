@@ -47,6 +47,7 @@ import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.StructType;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -62,6 +63,8 @@ import static org.apache.iceberg.MetadataTableType.FILES;
 import static org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT;
 import static org.apache.iceberg.TableProperties.FORMAT_VERSION;
 
+// TODO: temporarily ignore until Spark supports Iceberg expressions
+@Ignore
 @RunWith(Parameterized.class)
 public class TestMetadataTablesWithPartitionEvolution extends SparkCatalogTestBase {
 

@@ -27,8 +27,11 @@ import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.spark.SparkCatalogTestBase;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
+// TODO: temporarily ignore until Spark supports Iceberg transforms
+@Ignore
 public class TestDeleteFrom extends SparkCatalogTestBase {
   public TestDeleteFrom(String catalogName, String implementation, Map<String, String> config) {
     super(catalogName, implementation, config);

@@ -19,5 +19,9 @@
 
 package org.apache.iceberg.spark.source;
 
+import org.junit.Ignore;
+
+// TODO: temporarily ignore until Spark supports Iceberg expressions
+@Ignore
 public class TestSparkDataFile3 extends TestSparkDataFile {
 }

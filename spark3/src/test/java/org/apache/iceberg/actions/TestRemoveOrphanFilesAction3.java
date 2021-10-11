@@ -34,6 +34,8 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
+// TODO: temporarily ignore until Spark supports Iceberg expressions
+@Ignore
 public class TestRemoveOrphanFilesAction3 extends TestRemoveOrphanFilesAction {
   @Test
   public void testSparkCatalogTable() throws Exception {
