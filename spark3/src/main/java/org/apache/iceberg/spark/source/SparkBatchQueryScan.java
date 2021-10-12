@@ -36,6 +36,7 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.Spark3Util;
+import org.apache.iceberg.spark.SparkReadConf;
 import org.apache.iceberg.spark.SparkReadOptions;
 import org.apache.iceberg.spark.metrics.SparkMetricsUtil;
 import org.apache.spark.sql.SparkSession;
@@ -54,21 +55,21 @@ class SparkBatchQueryScan extends SparkBatchScan {
 
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
 
-  SparkBatchQueryScan(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
-                      List<Expression> filters, CaseInsensitiveStringMap options) {
+  SparkBatchQueryScan(SparkSession spark, Table table, SparkReadConf readConf, boolean caseSensitive,
+                      Schema expectedSchema, List<Expression> filters, CaseInsensitiveStringMap options) {
 
-    super(spark, table, caseSensitive, expectedSchema, filters, options);
+    super(spark, table, readConf, caseSensitive, expectedSchema, filters, options);
 
-    this.snapshotId = Spark3Util.propertyAsLong(options, SparkReadOptions.SNAPSHOT_ID, null);
-    this.asOfTimestamp = Spark3Util.propertyAsLong(options, SparkReadOptions.AS_OF_TIMESTAMP, null);
+    this.snapshotId = readConf.snapshotId();
+    this.asOfTimestamp = readConf.asOfTimestamp();
 
     if (snapshotId != null && asOfTimestamp != null) {
       throw new IllegalArgumentException(
           "Cannot scan using both snapshot-id and as-of-timestamp to select the table snapshot");
     }
 
-    this.startSnapshotId = Spark3Util.propertyAsLong(options, "start-snapshot-id", null);
-    this.endSnapshotId = Spark3Util.propertyAsLong(options, "end-snapshot-id", null);
+    this.startSnapshotId = readConf.startSnapshotId();
+    this.endSnapshotId = readConf.endSnapshotId();
     if (snapshotId != null || asOfTimestamp != null) {
       if (startSnapshotId != null || endSnapshotId != null) {
         throw new IllegalArgumentException(
@@ -171,16 +172,16 @@ class SparkBatchQueryScan extends SparkBatchScan {
 
 
   @SuppressWarnings("checkstyle:RegexpSingleline")
-  static SparkBatchQueryScan create(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
-                                    List<Expression> filters, CaseInsensitiveStringMap options) {
+  static SparkBatchQueryScan create(SparkSession spark, Table table, SparkReadConf readConf, boolean caseSensitive,
+                                    Schema expectedSchema, List<Expression> filters, CaseInsensitiveStringMap options) {
     Configuration conf = spark.sparkContext().hadoopConfiguration();
     Preconditions.checkArgument(conf != null, "Configuration is null");
     if (conf.getBoolean("iceberg.dropwizard.enable-metrics-collection", false)) {
       MetricRegistry metricRegistry = SparkMetricsUtil.metricRegistry();
-      return new MeteredSparkBatchQueryScan(metricRegistry, spark, table, caseSensitive, expectedSchema, filters,
-              options);
+      return new MeteredSparkBatchQueryScan(metricRegistry, spark, table, readConf, caseSensitive, expectedSchema,
+              filters, options);
     } else {
-      return new SparkBatchQueryScan(spark, table, caseSensitive, expectedSchema, filters, options);
+      return new SparkBatchQueryScan(spark, table, readConf, caseSensitive, expectedSchema, filters, options);
     }
   }
 
@@ -190,9 +191,9 @@ class SparkBatchQueryScan extends SparkBatchScan {
     private static final String QUERY_PLAN_TIME = "query.plan.time";
 
     MeteredSparkBatchQueryScan(MetricRegistry metricRegistry, SparkSession spark, Table table,
-                               boolean caseSensitive, Schema expectedSchema, List<Expression> filters,
-                               CaseInsensitiveStringMap options) {
-      super(spark, table, caseSensitive, expectedSchema, filters, options);
+                               SparkReadConf readConf, boolean caseSensitive, Schema expectedSchema,
+                               List<Expression> filters, CaseInsensitiveStringMap options) {
+      super(spark, table, readConf, caseSensitive, expectedSchema, filters, options);
       this.metricRegistry = metricRegistry;
     }
 

@@ -22,7 +22,6 @@ package org.apache.iceberg.spark.source;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -39,9 +38,8 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
-import org.apache.iceberg.spark.Spark3Util;
+import org.apache.iceberg.spark.SparkReadConf;
 import org.apache.iceberg.spark.SparkReadOptions;
-import org.apache.iceberg.util.PropertyUtil;
 import org.apache.iceberg.util.TableScanUtil;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.expressions.Expressions;
@@ -52,44 +50,32 @@ import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.sources.In;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
-import static org.apache.iceberg.TableProperties.SPLIT_LOOKBACK;
-import static org.apache.iceberg.TableProperties.SPLIT_LOOKBACK_DEFAULT;
-import static org.apache.iceberg.TableProperties.SPLIT_OPEN_FILE_COST;
-import static org.apache.iceberg.TableProperties.SPLIT_OPEN_FILE_COST_DEFAULT;
-import static org.apache.iceberg.TableProperties.SPLIT_SIZE;
-import static org.apache.iceberg.TableProperties.SPLIT_SIZE_DEFAULT;
-
 class SparkCopyOnWriteScan extends SparkBatchScan implements SupportsRuntimeFiltering {
 
   private final Long snapshotId;
-  private final Long splitSize;
-  private final Integer splitLookback;
-  private final Long splitOpenFileCost;
+  private final long splitSize;
+  private final int splitLookback;
+  private final long splitOpenFileCost;
 
   // lazy variables
   private List<FileScanTask> files = null; // lazy cache of files
   private List<CombinedScanTask> tasks = null; // lazy cache of tasks
   private Set<String> filteredLocations = null;
 
-  SparkCopyOnWriteScan(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
+  SparkCopyOnWriteScan(SparkSession spark, Table table, SparkReadConf readConf,
+                       boolean caseSensitive, Schema expectedSchema,
                        List<Expression> filters, CaseInsensitiveStringMap options) {
 
-    super(spark, table, caseSensitive, expectedSchema, filters, options);
+    super(spark, table, readConf, caseSensitive, expectedSchema, filters, options);
 
-    Map<String, String> props = table.properties();
+    this.splitSize = readConf.splitSize();
+    this.splitLookback = readConf.splitLookback();
+    this.splitOpenFileCost = readConf.splitOpenFileCost();
 
-    long tableSplitSize = PropertyUtil.propertyAsLong(props, SPLIT_SIZE, SPLIT_SIZE_DEFAULT);
-    this.splitSize = Spark3Util.propertyAsLong(options, SparkReadOptions.SPLIT_SIZE, tableSplitSize);
-
-    int tableSplitLookback = PropertyUtil.propertyAsInt(props, SPLIT_LOOKBACK, SPLIT_LOOKBACK_DEFAULT);
-    this.splitLookback = Spark3Util.propertyAsInt(options, SparkReadOptions.LOOKBACK, tableSplitLookback);
-
-    long tableOpenFileCost = PropertyUtil.propertyAsLong(props, SPLIT_OPEN_FILE_COST, SPLIT_OPEN_FILE_COST_DEFAULT);
-    this.splitOpenFileCost = Spark3Util.propertyAsLong(options, SparkReadOptions.FILE_OPEN_COST, tableOpenFileCost);
-
-    Preconditions.checkArgument(!options.containsKey("snapshot-id"), "Cannot have snapshot-id in options");
+    Preconditions.checkArgument(!options.containsKey(SparkReadOptions.SNAPSHOT_ID), "Can't set snapshot-id in options");
     Snapshot currentSnapshot = table.currentSnapshot();
     this.snapshotId = currentSnapshot != null ? currentSnapshot.snapshotId() : null;
+
     // init files with an empty list if the table is empty to avoid picking any concurrent changes
     this.files = currentSnapshot == null ? Collections.emptyList() : null;
   }

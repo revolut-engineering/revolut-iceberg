@@ -32,6 +32,7 @@ import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.SparkFilters;
+import org.apache.iceberg.spark.SparkReadConf;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.types.Types;
@@ -50,6 +51,7 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
 
   private final SparkSession spark;
   private final Table table;
+  private final SparkReadConf readConf;
   private final CaseInsensitiveStringMap options;
   private final List<String> metaColumns = Lists.newArrayList();
 
@@ -62,6 +64,7 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
   SparkScanBuilder(SparkSession spark, Table table, CaseInsensitiveStringMap options) {
     this.spark = spark;
     this.table = table;
+    this.readConf = new SparkReadConf(spark, table, options);
     this.options = options;
     this.caseSensitive = Boolean.parseBoolean(spark.conf().get("spark.sql.caseSensitive"));
   }
@@ -154,11 +157,11 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
   @Override
   public Scan build() {
     return SparkBatchQueryScan.create(
-        spark, table, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
+        spark, table, readConf, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
   }
 
   public Scan buildCopyOnWriteScan() {
     return new SparkCopyOnWriteScan(
-        spark, table, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
+        spark, table, readConf, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
   }
 }

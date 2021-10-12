@@ -23,7 +23,6 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.iceberg.CombinedScanTask;
 import org.apache.iceberg.FileFormat;
@@ -39,6 +38,7 @@ import org.apache.iceberg.hadoop.HadoopInputFile;
 import org.apache.iceberg.hadoop.Util;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.spark.Spark3Util;
+import org.apache.iceberg.spark.SparkReadConf;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.spark.SparkUtil;
 import org.apache.iceberg.util.PropertyUtil;
@@ -47,7 +47,6 @@ import org.apache.iceberg.util.Tasks;
 import org.apache.iceberg.util.ThreadPools;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.sql.RuntimeConfig;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.read.Batch;
@@ -69,6 +68,7 @@ abstract class SparkBatchScan implements Scan, Batch, SupportsReportStatistics {
 
   private final JavaSparkContext sparkContext;
   private final Table table;
+  private final SparkReadConf readConf;
   private final boolean caseSensitive;
   private final boolean localityPreferred;
   private final Schema expectedSchema;
@@ -79,18 +79,17 @@ abstract class SparkBatchScan implements Scan, Batch, SupportsReportStatistics {
   // lazy variables
   private StructType readSchema = null;
 
-  SparkBatchScan(SparkSession spark, Table table, boolean caseSensitive, Schema expectedSchema,
-                 List<Expression> filters, CaseInsensitiveStringMap options) {
+  SparkBatchScan(SparkSession spark, Table table, SparkReadConf readConf, boolean caseSensitive,
+                 Schema expectedSchema, List<Expression> filters, CaseInsensitiveStringMap options) {
     this.sparkContext = JavaSparkContext.fromSparkContext(spark.sparkContext());
     this.table = table;
+    this.readConf = readConf;
     this.caseSensitive = caseSensitive;
     this.expectedSchema = expectedSchema;
     this.filterExpressions = filters != null ? filters : Collections.emptyList();
-    this.localityPreferred = Spark3Util.isLocalityEnabled(table.io(), table.location(), options);
+    this.localityPreferred = readConf.localityEnabled();
+    this.readTimestampWithoutZone = readConf.handleTimestampWithoutZone();
     this.options = options;
-
-    RuntimeConfig sessionConf = SparkSession.active().conf();
-    this.readTimestampWithoutZone = SparkUtil.canHandleTimestampWithoutZone(options, sessionConf);
   }
 
   protected Table table() {
@@ -119,7 +118,7 @@ abstract class SparkBatchScan implements Scan, Batch, SupportsReportStatistics {
   @Override
   public MicroBatchStream toMicroBatchStream(String checkpointLocation) {
     return new SparkMicroBatchStream(
-        sparkContext, table, caseSensitive, expectedSchema, options, checkpointLocation);
+        sparkContext, table, readConf, caseSensitive, expectedSchema, options, checkpointLocation);
   }
 
   @Override
@@ -185,23 +184,20 @@ abstract class SparkBatchScan implements Scan, Batch, SupportsReportStatistics {
   }
 
   private boolean batchReadsEnabled(boolean isParquetOnly, boolean isOrcOnly) {
-    Map<String, String> properties = table.properties();
-    RuntimeConfig sessionConf = SparkSession.active().conf();
     if (isParquetOnly) {
-      return Spark3Util.isVectorizationEnabled(FileFormat.PARQUET, properties, sessionConf, options);
+      return readConf.parquetVectorizationEnabled();
     } else if (isOrcOnly) {
-      return Spark3Util.isVectorizationEnabled(FileFormat.ORC, properties, sessionConf, options);
+      return readConf.orcVectorizationEnabled();
     } else {
       return false;
     }
   }
 
   private int batchSize(boolean isParquetOnly, boolean isOrcOnly) {
-    Map<String, String> properties = table.properties();
     if (isParquetOnly) {
-      return Spark3Util.batchSize(FileFormat.PARQUET, properties, options);
+      return readConf.parquetBatchSize();
     } else if (isOrcOnly) {
-      return Spark3Util.batchSize(FileFormat.ORC, properties, options);
+      return readConf.orcBatchSize();
     } else {
       return 0;
     }

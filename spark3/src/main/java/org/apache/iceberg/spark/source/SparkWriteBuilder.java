@@ -19,7 +19,6 @@
 
 package org.apache.iceberg.spark.source;
 
-import java.util.Locale;
 import org.apache.iceberg.DistributionMode;
 import org.apache.iceberg.IsolationLevel;
 import org.apache.iceberg.Schema;
@@ -31,6 +30,7 @@ import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.SparkFilters;
 import org.apache.iceberg.spark.SparkSchemaUtil;
 import org.apache.iceberg.spark.SparkUtil;
+import org.apache.iceberg.spark.SparkWriteConf;
 import org.apache.iceberg.spark.SparkWriteOptions;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.spark.sql.SparkSession;
@@ -47,19 +47,18 @@ import org.apache.spark.sql.connector.write.WriteBuilder;
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 class SparkWriteBuilder implements WriteBuilder, SupportsDynamicOverwrite, SupportsOverwrite {
   private static final SortOrder[] EMPTY_ORDERING = new SortOrder[0];
 
   private final SparkSession spark;
   private final Table table;
+  private final SparkWriteConf writeConf;
   private final LogicalWriteInfo writeInfo;
   private final StructType dsSchema;
-  private final CaseInsensitiveStringMap options;
   private final String overwriteMode;
+  private final boolean handleTimestampWithoutZone;
   private final String rewrittenFileSetID;
-  private final boolean canHandleTimestampWithoutZone;
   private final DistributionMode distributionMode;
   private final boolean ignoreSortOrder;
   private boolean overwriteDynamic = false;
@@ -73,15 +72,14 @@ class SparkWriteBuilder implements WriteBuilder, SupportsDynamicOverwrite, Suppo
   SparkWriteBuilder(SparkSession spark, Table table, LogicalWriteInfo info) {
     this.spark = spark;
     this.table = table;
+    this.writeConf = new SparkWriteConf(spark, table, info.options());
     this.writeInfo = info;
     this.dsSchema = info.schema();
-    this.options = info.options();
-    this.overwriteMode = options.containsKey("overwrite-mode") ?
-        options.get("overwrite-mode").toLowerCase(Locale.ROOT) : null;
+    this.overwriteMode = writeConf.overwriteMode();
     this.rewrittenFileSetID = info.options().get(SparkWriteOptions.REWRITTEN_FILE_SCAN_TASK_SET_ID);
-    this.canHandleTimestampWithoutZone = SparkUtil.canHandleTimestampWithoutZone(options, spark.conf());
-    this.distributionMode = Spark3Util.distributionModeFor(table, options);
-    this.ignoreSortOrder = options.getBoolean(SparkWriteOptions.IGNORE_SORT_ORDER, false);
+    this.handleTimestampWithoutZone = writeConf.handleTimestampWithoutZone();
+    this.distributionMode = Spark3Util.distributionModeFor(table, info.options());
+    this.ignoreSortOrder = info.options().getBoolean(SparkWriteOptions.IGNORE_SORT_ORDER, false);
   }
 
   public WriteBuilder overwriteFiles(Scan scan, Command command, IsolationLevel writeIsolationLevel) {
@@ -125,24 +123,20 @@ class SparkWriteBuilder implements WriteBuilder, SupportsDynamicOverwrite, Suppo
 
   @Override
   public Write build() {
-    Preconditions.checkArgument(canHandleTimestampWithoutZone || !SparkUtil.hasTimestampWithoutZone(table.schema()),
-            SparkUtil.TIMESTAMP_WITHOUT_TIMEZONE_ERROR);
+    Preconditions.checkArgument(handleTimestampWithoutZone || !SparkUtil.hasTimestampWithoutZone(table.schema()),
+        SparkUtil.TIMESTAMP_WITHOUT_TIMEZONE_ERROR);
 
     Schema writeSchema = SparkSchemaUtil.convert(table.schema(), dsSchema);
-    TypeUtil.validateWriteSchema(table.schema(), writeSchema,
-        checkNullability(spark, options), checkOrdering(spark, options));
+    TypeUtil.validateWriteSchema(table.schema(), writeSchema, writeConf.checkNullability(), writeConf.checkOrdering());
     SparkUtil.validatePartitionTransforms(table.spec());
 
     // Get application id
     String appId = spark.sparkContext().applicationId();
 
-    // Get write-audit-publish id
-    String wapId = spark.conf().get("spark.wap.id", null);
-
     Distribution distribution = buildRequiredDistribution();
     SortOrder[] ordering = buildRequiredOrdering(distribution);
 
-    return new SparkWrite(spark, table, writeInfo, appId, wapId, writeSchema, dsSchema, distribution, ordering) {
+    return new SparkWrite(spark, table, writeConf, writeInfo, appId, writeSchema, dsSchema, distribution, ordering) {
 
       @Override
       public BatchWrite toBatch() {
@@ -193,19 +187,5 @@ class SparkWriteBuilder implements WriteBuilder, SupportsDynamicOverwrite, Suppo
     } else {
       return Spark3Util.buildRequiredOrdering(requiredDistribution, table);
     }
-  }
-
-  private static boolean checkNullability(SparkSession spark, CaseInsensitiveStringMap options) {
-    boolean sparkCheckNullability = Boolean.parseBoolean(
-        spark.conf().get("spark.sql.iceberg.check-nullability", "true"));
-    boolean dataFrameCheckNullability = options.getBoolean("check-nullability", true);
-    return sparkCheckNullability && dataFrameCheckNullability;
-  }
-
-  private static boolean checkOrdering(SparkSession spark, CaseInsensitiveStringMap options) {
-    boolean sparkCheckOrdering = Boolean.parseBoolean(spark.conf()
-        .get("spark.sql.iceberg.check-ordering", "true"));
-    boolean dataFrameCheckOrdering = options.getBoolean(SparkWriteOptions.CHECK_ORDERING, true);
-    return sparkCheckOrdering && dataFrameCheckOrdering;
   }
 }
