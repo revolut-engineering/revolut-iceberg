@@ -31,23 +31,6 @@ import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.types.Types;
 
-/**
- * Generates mapping from field IDs to ORC qualified names.
- * <p>
- * This visitor also enclose column names in backticks i.e. ` so that ORC can correctly parse column names with
- * special characters. A comparison of ORC convention with Iceberg convention is provided below
- * <pre><code>
- *                                      Iceberg           ORC
- * field                                field             field
- * struct -> field                      struct.field      struct.field
- * list -> element                      list.element      list._elem
- * list -> struct element -> field      list.field        list._elem.field
- * map -> key                           map.key           map._key
- * map -> value                         map.value         map._value
- * map -> struct key -> field           map.key.field     map._key.field
- * map -> struct value -> field         map.field         map._value.field
- * </code></pre>
- */
 class IdToOrcName extends TypeUtil.SchemaVisitor<Map<Integer, String>> {
   private static final Joiner DOT = Joiner.on(".");
 
