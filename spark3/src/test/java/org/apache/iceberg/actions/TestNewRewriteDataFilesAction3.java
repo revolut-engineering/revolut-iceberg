@@ -26,10 +26,7 @@ import org.apache.iceberg.spark.FileRewriteCoordinator;
 import org.apache.iceberg.spark.FileScanTaskSetManager;
 import org.apache.iceberg.spark.actions.SparkActions;
 import org.apache.iceberg.spark.actions.TestNewRewriteDataFilesAction;
-import org.junit.Ignore;
 
-// TODO: temporarily ignore until Spark supports Iceberg expressions
-@Ignore
 public class TestNewRewriteDataFilesAction3 extends TestNewRewriteDataFilesAction {
   private final FileRewriteCoordinator coordinator = FileRewriteCoordinator.get();
   private final FileScanTaskSetManager manager = FileScanTaskSetManager.get();

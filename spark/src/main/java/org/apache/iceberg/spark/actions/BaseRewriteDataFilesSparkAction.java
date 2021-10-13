@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.actions.BaseRewriteDataFilesFileGroupInfo;
@@ -43,6 +44,7 @@ import org.apache.iceberg.actions.RewriteDataFiles;
 import org.apache.iceberg.actions.RewriteDataFilesCommitManager;
 import org.apache.iceberg.actions.RewriteFileGroup;
 import org.apache.iceberg.actions.RewriteStrategy;
+import org.apache.iceberg.actions.SortStrategy;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expression;
@@ -99,6 +101,23 @@ abstract class BaseRewriteDataFilesSparkAction
    * The framework specific {@link BinPackStrategy}
    */
   protected abstract BinPackStrategy binPackStrategy();
+
+  /**
+   * The framework specific {@link SortStrategy}
+   */
+  protected abstract SortStrategy sortStrategy();
+
+  @Override
+  public RewriteDataFiles sort(SortOrder sortOrder) {
+    this.strategy = sortStrategy().sortOrder(sortOrder);
+    return this;
+  }
+
+  @Override
+  public RewriteDataFiles sort() {
+    this.strategy = sortStrategy();
+    return this;
+  }
 
   @Override
   public RewriteDataFiles binPack() {
