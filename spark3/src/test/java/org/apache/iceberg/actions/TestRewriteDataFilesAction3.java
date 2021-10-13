@@ -19,9 +19,5 @@
 
 package org.apache.iceberg.actions;
 
-import org.junit.Ignore;
-
-// TODO: temporarily ignore until Spark supports Iceberg expressions
-@Ignore
 public class TestRewriteDataFilesAction3 extends TestRewriteDataFilesAction {
 }

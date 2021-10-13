@@ -19,10 +19,6 @@
 
 package org.apache.iceberg.spark.source;
 
-import org.junit.Ignore;
-
-// TODO: temporarily ignore until Spark supports Iceberg expressions
-@Ignore
 public class TestPartitionPruning3 extends TestPartitionPruning {
   public TestPartitionPruning3(String format, boolean vectorized) {
     super(format, vectorized);

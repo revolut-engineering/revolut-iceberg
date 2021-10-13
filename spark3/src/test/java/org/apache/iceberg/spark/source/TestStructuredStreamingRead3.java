@@ -56,7 +56,6 @@ import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -64,8 +63,6 @@ import org.junit.runners.Parameterized;
 import static org.apache.iceberg.expressions.Expressions.ref;
 import static org.apache.iceberg.types.Types.NestedField.optional;
 
-// TODO: temporarily ignore until Spark supports Iceberg transforms
-@Ignore
 @RunWith(Parameterized.class)
 public final class TestStructuredStreamingRead3 extends SparkCatalogTestBase {
   public TestStructuredStreamingRead3(

@@ -48,7 +48,6 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.apache.iceberg.TableProperties.MERGE_ISOLATION_LEVEL;
@@ -476,8 +475,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  // TODO: temporarily ignore until Spark supports Iceberg transforms
-  @Ignore
+  @Test
   public void testMergeWithDaysTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, ts TIMESTAMP");
@@ -514,8 +512,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  // TODO: temporarily ignore until Spark supports Iceberg transforms
-  @Ignore
+  @Test
   public void testMergeWithBucketTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, dep STRING");
@@ -550,8 +547,7 @@ public abstract class TestMerge extends SparkRowLevelOperationsTestBase {
     }
   }
 
-  // TODO: temporarily ignore until Spark supports Iceberg transforms
-  @Ignore
+  @Test
   public void testMergeWithTruncateTransform() {
     for (DistributionMode mode : DistributionMode.values()) {
       createAndInitTable("id INT, dep STRING");

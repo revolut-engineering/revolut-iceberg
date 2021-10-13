@@ -32,11 +32,8 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.junit.After;
-import org.junit.Ignore;
 import org.junit.Test;
 
-// TODO: temporarily ignore until Spark supports Iceberg transforms
-@Ignore
 public class TestRequiredDistributionAndOrdering extends SparkCatalogTestBase {
   public TestRequiredDistributionAndOrdering(String catalogName, String implementation, Map<String, String> config) {
     super(catalogName, implementation, config);
