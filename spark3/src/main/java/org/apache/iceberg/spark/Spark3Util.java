@@ -51,6 +51,7 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
+import org.apache.iceberg.relocated.com.google.common.collect.ObjectArrays;
 import org.apache.iceberg.spark.SparkTableUtil.SparkPartition;
 import org.apache.iceberg.spark.source.SparkTable;
 import org.apache.iceberg.transforms.PartitionSpecVisitor;
@@ -73,9 +74,11 @@ import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
+import org.apache.spark.sql.connector.distributions.ClusteredDistribution;
 import org.apache.spark.sql.connector.distributions.Distribution;
 import org.apache.spark.sql.connector.distributions.Distributions;
 import org.apache.spark.sql.connector.distributions.OrderedDistribution;
+import org.apache.spark.sql.connector.distributions.UnspecifiedDistribution;
 import org.apache.spark.sql.connector.expressions.Expression;
 import org.apache.spark.sql.connector.expressions.Expressions;
 import org.apache.spark.sql.connector.expressions.Literal;
@@ -99,7 +102,9 @@ import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
 import static org.apache.iceberg.MetadataColumns.FILE_PATH;
+import static org.apache.iceberg.MetadataColumns.PARTITION_COLUMN_NAME;
 import static org.apache.iceberg.MetadataColumns.ROW_POSITION;
+import static org.apache.iceberg.MetadataColumns.SPEC_ID;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE_DEFAULT;
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE_RANGE;
@@ -309,10 +314,76 @@ public class Spark3Util {
     return transforms.stream().filter(Objects::nonNull).toArray(Transform[]::new);
   }
 
+  // TODO: support command specific distributions
+  public static Distribution buildPositionDeltaDistribution(DistributionMode distributionMode,
+                                                            Command command,
+                                                            org.apache.iceberg.Table table) {
+    if (distributionMode == DistributionMode.NONE) {
+      return Distributions.unspecified();
+    }
+
+    if (command == Command.DELETE && !table.spec().isUnpartitioned()) {
+      // cluster deletes by spec and partition,
+      // assuming all deletes for a single partition will fit into one Spark write task
+      NamedReference specId = Expressions.column(SPEC_ID.name());
+      NamedReference partition = Expressions.column(PARTITION_COLUMN_NAME);
+      Expression[] clustering = new Expression[]{specId, partition};
+      return Distributions.clustered(clustering);
+    }
+
+    // append spec ID and partition metadata columns to data distribution for UPDATE and MERGE commands
+    // these metadata columns will be null for new records that have to be inserted
+    Distribution dataDistribution = buildRequiredDistribution(distributionMode, table);
+
+    if (dataDistribution instanceof ClusteredDistribution) {
+      NamedReference specId = Expressions.column(SPEC_ID.name());
+      NamedReference partition = Expressions.column(PARTITION_COLUMN_NAME);
+      Expression[] deleteClustering = new Expression[]{specId, partition};
+      Expression[] dataClustering = ((ClusteredDistribution) dataDistribution).clustering();
+      Expression[] clustering = ObjectArrays.concat(deleteClustering, dataClustering, Expression.class);
+      return Distributions.clustered(clustering);
+
+    } else if (dataDistribution instanceof OrderedDistribution) {
+      SortOrder specId = Expressions.sort(Expressions.column(SPEC_ID.name()), SortDirection.ASCENDING);
+      SortOrder partition = Expressions.sort(Expressions.column(PARTITION_COLUMN_NAME), SortDirection.ASCENDING);
+      SortOrder file = Expressions.sort(Expressions.column(FILE_PATH.name()), SortDirection.ASCENDING);
+      SortOrder[] deleteOrdering = new SortOrder[]{specId, partition, file};
+      SortOrder[] dataOrdering = ((OrderedDistribution) dataDistribution).ordering();
+      SortOrder[] ordering = ObjectArrays.concat(deleteOrdering, dataOrdering, SortOrder.class);
+      return Distributions.ordered(ordering);
+
+    } else if (dataDistribution instanceof UnspecifiedDistribution) {
+      return Distributions.unspecified();
+
+    } else {
+      throw new IllegalArgumentException("Unexpected data distribution type: " + dataDistribution);
+    }
+  }
+
+  public static SortOrder[] buildPositionDeltaRequiredOrdering(Distribution distribution,
+                                                               Command command,
+                                                               org.apache.iceberg.Table table) {
+    // the spec requires position delete files to be sorted by file and pos
+    SortOrder specId = Expressions.sort(Expressions.column(SPEC_ID.name()), SortDirection.ASCENDING);
+    SortOrder file = Expressions.sort(Expressions.column(FILE_PATH.name()), SortDirection.ASCENDING);
+    SortOrder pos = Expressions.sort(Expressions.column(ROW_POSITION.name()), SortDirection.ASCENDING);
+    SortOrder[] deleteOrdering = new SortOrder[]{specId, file, pos};
+
+    if (command == Command.DELETE) {
+      return deleteOrdering;
+    } else {
+      // all metadata columns like spec, file, pos will be null for new data records
+      SortOrder[] dataOrdering = buildRequiredOrdering(distribution, table);
+      return ObjectArrays.concat(deleteOrdering, dataOrdering, SortOrder.class);
+    }
+  }
+
   public static Distribution buildCopyOnWriteRequiredDistribution(DistributionMode distributionMode,
                                                                   Command command,
                                                                   org.apache.iceberg.Table table) {
-    if (command == Command.DELETE) {
+    if (distributionMode == DistributionMode.NONE) {
+      return Distributions.unspecified();
+    } else if (command == Command.DELETE) {
       NamedReference file = Expressions.column(FILE_PATH.name());
       Expression[] clustering = new Expression[]{file};
       return Distributions.clustered(clustering);

@@ -332,6 +332,33 @@ public class TypeUtil {
     }
   }
 
+  public static void validateSchema(String ctx, Schema expectedSchema, Schema actualSchema,
+                                    Boolean checkNullability, Boolean checkOrdering) {
+    List<String> errors;
+    if (checkNullability) {
+      errors = CheckCompatibility.writeCompatibilityErrors(expectedSchema, actualSchema, checkOrdering);
+    } else {
+      errors = CheckCompatibility.typeCompatibilityErrors(expectedSchema, actualSchema, checkOrdering);
+    }
+
+    if (!errors.isEmpty()) {
+      StringBuilder sb = new StringBuilder();
+      String header = String.format("Schema is not compatible with expected %s schema:", ctx);
+      sb.append(header)
+          .append("\nexpected schema:")
+          .append(expectedSchema)
+          .append("\nactual schema:")
+          .append(actualSchema)
+          .append("\nproblems:");
+
+      for (String error : errors) {
+        sb.append("\n* ").append(error);
+      }
+
+      throw new IllegalArgumentException(sb.toString());
+    }
+  }
+
   /**
    * Interface for passing a function that assigns column IDs.
    */

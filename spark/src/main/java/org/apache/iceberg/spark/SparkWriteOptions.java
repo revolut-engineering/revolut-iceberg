@@ -30,8 +30,12 @@ public class SparkWriteOptions {
   // Fileformat for write operations(default: Table write.format.default )
   public static final String WRITE_FORMAT = "write-format";
 
+  public static final String DELETE_FORMAT = "delete-format";
+
   // Overrides this table's write.target-file-size-bytes
   public static final String TARGET_FILE_SIZE_BYTES = "target-file-size-bytes";
+
+  public static final String TARGET_DELETE_FILE_SIZE_BYTES = "target-delete-file-size-bytes";
 
   //  Sets the nullable check on fields(default: true)
   public static final String CHECK_NULLABILITY = "check-nullability";

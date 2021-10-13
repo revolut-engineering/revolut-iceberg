@@ -42,6 +42,15 @@ public interface PositionDeltaWriter<T> extends Closeable {
   void insert(T row, PartitionSpec spec, StructLike partition);
 
   /**
+   * Writes a new version of a row to the provided spec/partition.
+   *
+   * @param row a data record
+   * @param spec a partition spec
+   * @param partition a partition or null if the spec is unpartitioned
+   */
+  void update(T row, PartitionSpec spec, StructLike partition);
+
+  /**
    * Deletes a position in the provided spec/partition.
    *
    * @param path a data file path

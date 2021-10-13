@@ -97,6 +97,13 @@ public class SparkWriteConf {
     return overwriteMode != null ? overwriteMode.toLowerCase(Locale.ROOT) : null;
   }
 
+  public boolean wapEnabled() {
+    return confParser.booleanConf()
+        .tableProperty(TableProperties.WRITE_AUDIT_PUBLISH_ENABLED)
+        .defaultValue(TableProperties.WRITE_AUDIT_PUBLISH_ENABLED_DEFAULT)
+        .parse();
+  }
+
   public String wapId() {
     return sessionConf.get("spark.wap.id", null);
   }
@@ -115,6 +122,23 @@ public class SparkWriteConf {
         .option(SparkWriteOptions.TARGET_FILE_SIZE_BYTES)
         .tableProperty(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES)
         .defaultValue(TableProperties.WRITE_TARGET_FILE_SIZE_BYTES_DEFAULT)
+        .parse();
+  }
+
+  public FileFormat deleteFileFormat() {
+    String valueAsString = confParser.stringConf()
+        .option(SparkWriteOptions.DELETE_FORMAT)
+        .tableProperty(TableProperties.DELETE_DEFAULT_FILE_FORMAT)
+        .parseOptional();
+    return valueAsString != null ? FileFormat.valueOf(valueAsString.toUpperCase(Locale.ENGLISH)) : dataFileFormat();
+  }
+
+  public long targetDeleteFileSize() {
+    long defaultValue = targetDataFileSize() / 4;
+    return confParser.longConf()
+        .option(SparkWriteOptions.TARGET_DELETE_FILE_SIZE_BYTES)
+        .tableProperty(TableProperties.DELETE_TARGET_FILE_SIZE_BYTES)
+        .defaultValue(defaultValue)
         .parse();
   }
 

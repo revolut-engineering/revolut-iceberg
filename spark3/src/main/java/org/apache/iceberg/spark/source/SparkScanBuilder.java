@@ -164,4 +164,9 @@ public class SparkScanBuilder implements ScanBuilder, SupportsPushDownFilters, S
     return new SparkCopyOnWriteScan(
         spark, table, readConf, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
   }
+
+  public Scan buildMergeOnReadScan() {
+    return new SparkMergeOnReadScan(
+        spark, table, readConf, caseSensitive, schemaWithMetadataColumns(), filterExpressions, options);
+  }
 }
