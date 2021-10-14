@@ -229,6 +229,7 @@ project(':iceberg-core') {
 
     testImplementation "org.xerial:sqlite-jdbc"
     testImplementation project(path: ':iceberg-api', configuration: 'testArtifacts')
+    testImplementation "org.apache.commons:commons-lang3"
   }
 }
 

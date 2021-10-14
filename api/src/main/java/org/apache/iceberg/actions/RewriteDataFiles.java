@@ -94,12 +94,21 @@ public interface RewriteDataFiles extends SnapshotUpdate<RewriteDataFiles, Rewri
   }
 
   /**
-   * Choose SORT as a strategy for this rewrite operations and manually specify the sortOrder to use
-   * @param sortOrder user definied sortOrder
+   * Choose SORT as a strategy for this rewrite operation and manually specify the sortOrder to use
+   * @param sortOrder user defined sortOrder
    * @return this for method chaining
    */
   default RewriteDataFiles sort(SortOrder sortOrder) {
     throw new UnsupportedOperationException("SORT Rewrite Strategy not implemented for this framework");
+  }
+
+  /**
+   * Choose Z-ORDER as a strategy for this rewrite operation with a specified list of columns to use
+   * @param columns Columns to be used to generate Z-Values
+   * @return this for method chaining
+   */
+  default RewriteDataFiles zOrder(String... columns) {
+    throw new UnsupportedOperationException("Z-ORDER Rewrite Strategy not implemented for this framework");
   }
 
   /**

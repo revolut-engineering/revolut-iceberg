@@ -47,9 +47,11 @@ import org.apache.iceberg.actions.RewriteDataFilesCommitManager;
 import org.apache.iceberg.actions.RewriteFileGroup;
 import org.apache.iceberg.actions.SortStrategy;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
@@ -75,6 +77,10 @@ import org.mockito.ArgumentMatcher;
 import org.mockito.Mockito;
 
 import static org.apache.iceberg.types.Types.NestedField.optional;
+import static org.apache.iceberg.types.Types.NestedField.required;
+import static org.apache.spark.sql.functions.current_date;
+import static org.apache.spark.sql.functions.date_add;
+import static org.apache.spark.sql.functions.expr;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
@@ -281,8 +287,8 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
 
     Result result = basicRewrite(table)
         .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.25))) // 5000 Per File
-        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.8)))
-        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, Integer.toString(targetSize + 100)) // All files too small
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.25 + 100)))
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.25) - 100)) // All files
         .execute();
 
     Assert.assertEquals("Action should delete 10 data files", 10, result.rewrittenDataFilesCount());
@@ -309,7 +315,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
             .execute();
 
     Assert.assertEquals("Should have 1 fileGroup because all files were not correctly partitioned",
-        result.rewriteResults().size(), 1);
+        1, result.rewriteResults().size());
 
     table.refresh();
 
@@ -332,11 +338,11 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     RewriteDataFiles.Result result =
         basicRewrite(table)
             .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
-            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
             .option(RewriteDataFiles.PARTIAL_PROGRESS_MAX_COMMITS, "10")
             .execute();
 
-    Assert.assertEquals("Should have 10 fileGroups", result.rewriteResults().size(), 10);
+    Assert.assertEquals("Should have 10 fileGroups", 10, result.rewriteResults().size());
 
     table.refresh();
 
@@ -357,11 +363,11 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     // Perform a rewrite but only allow 2 files to be compacted at a time
     RewriteDataFiles.Result result =
         basicRewrite(table)
-            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
             .option(BinPackStrategy.MIN_INPUT_FILES, "1")
             .execute();
 
-    Assert.assertEquals("Should have 10 fileGroups", result.rewriteResults().size(), 10);
+    Assert.assertEquals("Should have 10 fileGroups", 10, result.rewriteResults().size());
 
     table.refresh();
 
@@ -382,12 +388,12 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     // Perform a rewrite but only allow 2 files to be compacted at a time
     RewriteDataFiles.Result result =
         basicRewrite(table)
-            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
             .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
             .option(RewriteDataFiles.PARTIAL_PROGRESS_MAX_COMMITS, "3")
             .execute();
 
-    Assert.assertEquals("Should have 10 fileGroups", result.rewriteResults().size(), 10);
+    Assert.assertEquals("Should have 10 fileGroups", 10, result.rewriteResults().size());
 
     table.refresh();
 
@@ -408,7 +414,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100));
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000));
 
     BaseRewriteDataFilesSparkAction spyRewrite = Mockito.spy(realRewrite);
 
@@ -441,7 +447,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100));
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000));
 
     BaseRewriteDataFilesSparkAction spyRewrite = spy(realRewrite);
     RewriteDataFilesCommitManager util = spy(new RewriteDataFilesCommitManager(table));
@@ -478,7 +484,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
                 .option(RewriteDataFiles.MAX_CONCURRENT_FILE_GROUP_REWRITES, "3");
 
     BaseRewriteDataFilesSparkAction spyRewrite = Mockito.spy(realRewrite);
@@ -512,7 +518,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_MAX_COMMITS, "3");
 
@@ -526,7 +532,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
 
     RewriteDataFiles.Result result = spyRewrite.execute();
 
-    Assert.assertEquals("Should have 7 fileGroups", result.rewriteResults().size(), 7);
+    Assert.assertEquals("Should have 7 fileGroups", 7, result.rewriteResults().size());
 
     table.refresh();
 
@@ -550,7 +556,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
                 .option(RewriteDataFiles.MAX_CONCURRENT_FILE_GROUP_REWRITES, "3")
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_MAX_COMMITS, "3");
@@ -565,7 +571,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
 
     RewriteDataFiles.Result result = spyRewrite.execute();
 
-    Assert.assertEquals("Should have 7 fileGroups", result.rewriteResults().size(), 7);
+    Assert.assertEquals("Should have 7 fileGroups", 7, result.rewriteResults().size());
 
     table.refresh();
 
@@ -589,7 +595,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     BaseRewriteDataFilesSparkAction realRewrite =
         (org.apache.iceberg.spark.actions.BaseRewriteDataFilesSparkAction)
             basicRewrite(table)
-                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+                .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
                 .option(RewriteDataFiles.MAX_CONCURRENT_FILE_GROUP_REWRITES, "3")
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_ENABLED, "true")
                 .option(RewriteDataFiles.PARTIAL_PROGRESS_MAX_COMMITS, "3");
@@ -676,7 +682,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
         basicRewrite(table)
             .sort()
             .option(SortStrategy.REWRITE_ALL, "true")
-            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 100))
+            .option(RewriteDataFiles.MAX_FILE_GROUP_SIZE_BYTES, Integer.toString(fileSize * 2 + 1000))
             .execute();
 
     Assert.assertEquals("Should have 10 fileGroups", result.rewriteResults().size(), 10);
@@ -707,7 +713,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
             .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString(averageFileSize(table)))
             .execute();
 
-    Assert.assertEquals("Should have 1 fileGroups", result.rewriteResults().size(), 1);
+    Assert.assertEquals("Should have 1 fileGroups", 1, result.rewriteResults().size());
 
     table.refresh();
 
@@ -733,11 +739,11 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
         basicRewrite(table)
             .sort()
             .option(SortStrategy.MIN_INPUT_FILES, "1")
-            .option(SortStrategy.MIN_FILE_SIZE_BYTES, Integer.toString(averageFileSize(table) - 10))
+            .option(SortStrategy.REWRITE_ALL, "true")
             .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString(averageFileSize(table)))
             .execute();
 
-    Assert.assertEquals("Should have 4 fileGroups", result.rewriteResults().size(), 4);
+    Assert.assertEquals("Should have 4 fileGroups", 4, result.rewriteResults().size());
 
     table.refresh();
 
@@ -768,7 +774,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
             .execute();
 
     Assert.assertEquals("Should have 1 fileGroup because all files were not correctly partitioned",
-        result.rewriteResults().size(), 1);
+        1, result.rewriteResults().size());
 
     table.refresh();
 
@@ -796,7 +802,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
             .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString(averageFileSize(table)))
             .execute();
 
-    Assert.assertEquals("Should have 1 fileGroups", result.rewriteResults().size(), 1);
+    Assert.assertEquals("Should have 1 fileGroups", 1, result.rewriteResults().size());
 
     table.refresh();
 
@@ -826,7 +832,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
             .option(SortStrategy.MIN_INPUT_FILES, "1")
             .execute();
 
-    Assert.assertEquals("Should have 1 fileGroups", result.rewriteResults().size(), 1);
+    Assert.assertEquals("Should have 1 fileGroups", 1, result.rewriteResults().size());
     Assert.assertTrue("Should have written 40+ files", Iterables.size(table.currentSnapshot().addedFiles()) >= 40);
 
     table.refresh();
@@ -838,6 +844,83 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     shouldHaveACleanCache(table);
     shouldHaveFiles(table, 40);
     shouldHaveLastCommitSorted(table, "c2");
+  }
+
+  @Test
+  public void testZOrderSort() {
+    int originalFiles = 20;
+    Table table = createTable(originalFiles);
+    shouldHaveLastCommitUnsorted(table, "c2");
+    shouldHaveFiles(table, originalFiles);
+
+    List<Object[]> originalData = currentData();
+    double originalFilesC2 = percentFilesRequired(table, "c2", "foo23");
+    double originalFilesC3 = percentFilesRequired(table, "c3", "bar21");
+    double originalFilesC2C3 = percentFilesRequired(table, new String[]{"c2", "c3"}, new String[]{"foo23", "bar23"});
+
+    Assert.assertTrue("Should require all files to scan c2", originalFilesC2 > 0.99);
+    Assert.assertTrue("Should require all files to scan c3", originalFilesC3 > 0.99);
+
+    RewriteDataFiles.Result result =
+        basicRewrite(table)
+            .zOrder("c2", "c3")
+            .option(SortStrategy.MAX_FILE_SIZE_BYTES, Integer.toString((averageFileSize(table) / 2) + 2))
+            // Divide files in 2
+            .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString(averageFileSize(table) / 2))
+            .option(SortStrategy.MIN_INPUT_FILES, "1")
+            .execute();
+
+    Assert.assertEquals("Should have 1 fileGroups", 1, result.rewriteResults().size());
+    int zOrderedFilesTotal = Iterables.size(table.currentSnapshot().addedFiles());
+    Assert.assertTrue("Should have written 40+ files", zOrderedFilesTotal >= 40);
+
+    table.refresh();
+
+    List<Object[]> postRewriteData = currentData();
+    assertEquals("We shouldn't have changed the data", originalData, postRewriteData);
+
+    shouldHaveSnapshots(table, 2);
+    shouldHaveACleanCache(table);
+
+    double filesScannedC2 = percentFilesRequired(table, "c2", "foo23");
+    double filesScannedC3 = percentFilesRequired(table, "c3", "bar21");
+    double filesScannedC2C3 = percentFilesRequired(table, new String[]{"c2", "c3"}, new String[]{"foo23", "bar23"});
+
+    Assert.assertTrue("Should have reduced the number of files required for c2",
+        filesScannedC2 < originalFilesC2);
+    Assert.assertTrue("Should have reduced the number of files required for c3",
+        filesScannedC3 < originalFilesC3);
+    Assert.assertTrue("Should have reduced the number of files required for a c2,c3 predicate",
+        filesScannedC2C3 < originalFilesC2C3);
+  }
+
+  @Test
+  public void testZOrderAllTypesSort() {
+    Table table = createTypeTestTable();
+    shouldHaveFiles(table, 10);
+
+    List<Row> originalRaw = spark.read().format("iceberg").load(tableLocation).sort("longCol").collectAsList();
+    List<Object[]> originalData = rowsToJava(originalRaw);
+
+    RewriteDataFiles.Result result =
+        basicRewrite(table)
+            .zOrder("longCol", "intCol", "floatCol", "doubleCol", "dateCol", "timestampCol", "stringCol")
+            .option(SortStrategy.MIN_INPUT_FILES, "1")
+            .option(SortStrategy.REWRITE_ALL, "true")
+            .execute();
+
+    Assert.assertEquals("Should have 1 fileGroups", 1, result.rewriteResults().size());
+    int zOrderedFilesTotal = Iterables.size(table.currentSnapshot().addedFiles());
+    Assert.assertEquals("Should have written 1 file", 1, zOrderedFilesTotal);
+
+    table.refresh();
+
+    List<Row> postRaw = spark.read().format("iceberg").load(tableLocation).sort("longCol").collectAsList();
+    List<Object[]> postRewriteData = rowsToJava(postRaw);
+    assertEquals("We shouldn't have changed the data", originalData, postRewriteData);
+
+    shouldHaveSnapshots(table, 2);
+    shouldHaveACleanCache(table);
   }
 
   @Test
@@ -948,7 +1031,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     List<Pair<Pair<T, T>, Pair<T, T>>>
         overlappingFiles = getOverlappingFiles(table, column);
 
-    Assert.assertNotEquals("Found overlapping files", Collections.emptyList(), overlappingFiles);
+    Assert.assertNotEquals("Found no overlapping files", Collections.emptyList(), overlappingFiles);
   }
 
   private <T> List<Pair<Pair<T, T>, Pair<T, T>>> getOverlappingFiles(Table table, String column) {
@@ -980,8 +1063,8 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
                 T rLower = right.first();
                 T rUpper = right.second();
                 boolean boundsOverlap =
-                    (comparator.compare(lUpper, rLower) > 0 && comparator.compare(lUpper, rUpper) < 0) ||
-                        (comparator.compare(lLower, rLower) > 0 && comparator.compare(lLower, rUpper) < 0);
+                    (comparator.compare(lUpper, rLower) >= 0 && comparator.compare(lUpper, rUpper) <= 0) ||
+                        (comparator.compare(lLower, rLower) >= 0 && comparator.compare(lLower, rUpper) <= 0);
 
                 return (left != right) && boundsOverlap;
               })
@@ -1034,6 +1117,35 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     return table;
   }
 
+  private Table createTypeTestTable() {
+    Schema schema = new Schema(
+        required(1, "longCol", Types.LongType.get()),
+        required(2, "intCol", Types.IntegerType.get()),
+        required(3, "floatCol", Types.FloatType.get()),
+        optional(4, "doubleCol", Types.DoubleType.get()),
+        optional(6, "dateCol", Types.DateType.get()),
+        optional(7, "timestampCol", Types.TimestampType.withZone()),
+        optional(8, "stringCol", Types.StringType.get()));
+
+    Map<String, String> options = Maps.newHashMap();
+    Table table = TABLES.create(schema, PartitionSpec.unpartitioned(), options, tableLocation);
+
+    spark.range(0, 10, 1, 10)
+        .withColumnRenamed("id", "longCol")
+        .withColumn("intCol", expr("CAST(longCol AS INT)"))
+        .withColumn("floatCol", expr("CAST(longCol AS FLOAT)"))
+        .withColumn("doubleCol", expr("CAST(longCol AS DOUBLE)"))
+        .withColumn("dateCol", date_add(current_date(), 1))
+        .withColumn("timestampCol", expr("TO_TIMESTAMP(dateCol)"))
+        .withColumn("stringCol", expr("CAST(dateCol AS STRING)"))
+        .write()
+        .format("iceberg")
+        .mode("append")
+        .save(tableLocation);
+
+    return table;
+  }
+
   protected int averageFileSize(Table table) {
     table.refresh();
     return (int) Streams.stream(table.newScan().planFiles()).mapToLong(FileScanTask::length).average().getAsDouble();
@@ -1045,12 +1157,18 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
 
   private void writeRecords(int files, int numRecords, int partitions) {
     List<ThreeColumnRecord> records = Lists.newArrayList();
-    List<Integer> data = IntStream.range(0, numRecords).boxed().collect(Collectors.toList());
+    int rowDimension = (int) Math.ceil(Math.sqrt(numRecords));
+    List<Pair<Integer, Integer>> data =
+        IntStream.range(0, rowDimension).boxed().flatMap(x ->
+            IntStream.range(0, rowDimension).boxed().map(y -> Pair.of(x, y)))
+            .collect(Collectors.toList());
     Collections.shuffle(data, new Random(42));
     if (partitions > 0) {
-      data.forEach(i -> records.add(new ThreeColumnRecord(i % partitions, "foo" + i, "bar" + i)));
+      data.forEach(i ->
+          records.add(new ThreeColumnRecord(i.first() % partitions, "foo" + i.first(), "bar" + i.second())));
     } else {
-      data.forEach(i -> records.add(new ThreeColumnRecord(i, "foo" + i, "bar" + i)));
+      data.forEach(i ->
+          records.add(new ThreeColumnRecord(i.first(), "foo" + i.first(), "bar" + i.second())));
     }
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).repartition(files);
     writeDF(df);
@@ -1062,6 +1180,21 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
         .format("iceberg")
         .mode("append")
         .save(tableLocation);
+  }
+
+  private double percentFilesRequired(Table table, String col, String value) {
+    return percentFilesRequired(table, new String[]{col}, new String[]{value});
+  }
+
+  private double percentFilesRequired(Table table, String[] cols, String[] values) {
+    Preconditions.checkArgument(cols.length == values.length);
+    Expression restriction = Expressions.alwaysTrue();
+    for (int i = 0; i < cols.length; i++) {
+      restriction = Expressions.and(restriction, Expressions.equal(cols[i], values[i]));
+    }
+    int totalFiles = Iterables.size(table.newScan().planFiles());
+    int filteredFiles = Iterables.size(table.newScan().filter(restriction).planFiles());
+    return (double) filteredFiles / (double) totalFiles;
   }
 
   class GroupInfoMatcher implements ArgumentMatcher<RewriteFileGroup> {

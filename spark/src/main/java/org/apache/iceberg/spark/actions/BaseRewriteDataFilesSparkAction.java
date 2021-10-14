@@ -107,6 +107,11 @@ abstract class BaseRewriteDataFilesSparkAction
    */
   protected abstract SortStrategy sortStrategy();
 
+  /**
+   * The framework specific ZOrder Strategy
+   */
+  protected abstract SortStrategy zOrderStrategy(String... columnNames);
+
   @Override
   public RewriteDataFiles sort(SortOrder sortOrder) {
     this.strategy = sortStrategy().sortOrder(sortOrder);
@@ -122,6 +127,12 @@ abstract class BaseRewriteDataFilesSparkAction
   @Override
   public RewriteDataFiles binPack() {
     this.strategy = binPackStrategy();
+    return this;
+  }
+
+  @Override
+  public RewriteDataFiles zOrder(String... columnNames) {
+    this.strategy = zOrderStrategy(columnNames);
     return this;
   }
 
