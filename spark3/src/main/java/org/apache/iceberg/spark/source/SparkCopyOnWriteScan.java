@@ -111,7 +111,7 @@ class SparkCopyOnWriteScan extends SparkBatchScan implements SupportsRuntimeFilt
         // Spark may call this multiple times for UPDATEs with subqueries
         // as such cases are rewritten using UNION and the same scan on both sides
         // so filter files only if it is beneficial
-        if (fileLocations.size() < filteredLocations.size()) {
+        if (filteredLocations == null || fileLocations.size() < filteredLocations.size()) {
           this.tasks = null;
           this.filteredLocations = fileLocations;
           this.files = files().stream()
