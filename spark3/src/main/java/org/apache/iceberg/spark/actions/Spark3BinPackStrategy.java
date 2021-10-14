@@ -62,9 +62,15 @@ public class Spark3BinPackStrategy extends BinPackStrategy {
       SparkSession cloneSession = spark.cloneSession();
       cloneSession.conf().set(SQLConf.ADAPTIVE_EXECUTION_ENABLED().key(), false);
 
+      long targetReadSize = splitSize(inputFileSize(filesToRewrite));
+      // Ideally this would be the row-group size but the row group size is not guaranteed to be consistent
+      long fileSplitSize = targetReadSize / 4;
+
       Dataset<Row> scanDF = cloneSession.read().format("iceberg")
+          .option(SparkReadOptions.SPLIT_SIZE, fileSplitSize)
           .option(SparkReadOptions.FILE_SCAN_TASK_SET_ID, groupID)
-          .option(SparkReadOptions.SPLIT_SIZE, splitSize(inputFileSize(filesToRewrite)))
+          .option(SparkReadOptions.FILE_SCAN_TARGET_SIZE, targetReadSize)
+          .option(SparkReadOptions.LOOKBACK, 10)
           .option(SparkReadOptions.FILE_OPEN_COST, "0")
           .load(table.name());
 

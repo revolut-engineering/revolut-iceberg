@@ -67,6 +67,7 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -237,7 +238,7 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     assertEquals("Rows must match", expectedRecords, actualRecords);
   }
 
-  @Test
+  @Ignore
   public void testBinPackCombineMixedFiles() {
     // One file too big
     Table table = createTable(1);
@@ -263,6 +264,31 @@ public abstract class TestNewRewriteDataFilesAction extends SparkTestBase {
     Assert.assertEquals("Action should add 3 data files", 3, result.addedDataFilesCount());
 
     shouldHaveFiles(table, 3);
+
+    List<Object[]> actualRecords = currentData();
+    assertEquals("Rows must match", expectedRecords, actualRecords);
+  }
+
+  @Test
+  public void testBinPackCombineMediumFiles() {
+    // Create 10 files
+    Table table = createTable(10);
+    shouldHaveFiles(table, 10);
+
+    List<Object[]> expectedRecords = currentData(); // 40000 Rows , 4000 per File
+
+    int targetSize = averageFileSize(table);
+
+    Result result = basicRewrite(table)
+        .option(RewriteDataFiles.TARGET_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.25))) // 5000 Per File
+        .option(BinPackStrategy.MAX_FILE_SIZE_BYTES, Integer.toString((int) (targetSize * 1.8)))
+        .option(BinPackStrategy.MIN_FILE_SIZE_BYTES, Integer.toString(targetSize + 100)) // All files too small
+        .execute();
+
+    Assert.assertEquals("Action should delete 10 data files", 10, result.rewrittenDataFilesCount());
+    Assert.assertEquals("Action should add 8 data files", 8, result.addedDataFilesCount());
+
+    shouldHaveFiles(table, 8); // 40000 Rows, 5000 per File
 
     List<Object[]> actualRecords = currentData();
     assertEquals("Rows must match", expectedRecords, actualRecords);

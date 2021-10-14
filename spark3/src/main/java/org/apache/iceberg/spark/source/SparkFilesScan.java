@@ -46,7 +46,8 @@ import static org.apache.iceberg.TableProperties.SPLIT_SIZE_DEFAULT;
 
 class SparkFilesScan extends SparkBatchScan {
   private final String taskSetID;
-  private final Long splitSize;
+  private final Long readSplitSize;
+  private final Long planTargetSize;
   private final Integer splitLookback;
   private final Long splitOpenFileCost;
 
@@ -59,8 +60,11 @@ class SparkFilesScan extends SparkBatchScan {
 
     Map<String, String> props = table.properties();
 
+    // Before we recombine our files we want to break them into smaller parts
     long tableSplitSize = PropertyUtil.propertyAsLong(props, SPLIT_SIZE, SPLIT_SIZE_DEFAULT);
-    this.splitSize = Spark3Util.propertyAsLong(options, SparkReadOptions.SPLIT_SIZE, tableSplitSize);
+    this.readSplitSize = Spark3Util.propertyAsLong(options, SparkReadOptions.SPLIT_SIZE, tableSplitSize);
+
+    this.planTargetSize = Spark3Util.propertyAsLong(options, SparkReadOptions.FILE_SCAN_TARGET_SIZE, readSplitSize);
 
     int tableSplitLookback = PropertyUtil.propertyAsInt(props, SPLIT_LOOKBACK, SPLIT_LOOKBACK_DEFAULT);
     this.splitLookback = Spark3Util.propertyAsInt(options, SparkReadOptions.LOOKBACK, tableSplitLookback);
@@ -80,9 +84,9 @@ class SparkFilesScan extends SparkBatchScan {
 
       CloseableIterable<FileScanTask> splitFiles = TableScanUtil.splitFiles(
           CloseableIterable.withNoopClose(files),
-          splitSize);
+          readSplitSize);
       CloseableIterable<CombinedScanTask> scanTasks = TableScanUtil.planTasks(
-          splitFiles, splitSize,
+          splitFiles, planTargetSize,
           splitLookback, splitOpenFileCost);
       this.tasks = Lists.newArrayList(scanTasks);
     }
@@ -103,14 +107,15 @@ class SparkFilesScan extends SparkBatchScan {
     SparkFilesScan that = (SparkFilesScan) other;
     return table().name().equals(that.table().name()) &&
         Objects.equals(taskSetID, that.taskSetID) &&
-        Objects.equals(splitSize, that.splitSize) &&
+        Objects.equals(planTargetSize, that.planTargetSize) &&
+        Objects.equals(readSplitSize, that.readSplitSize) &&
         Objects.equals(splitLookback, that.splitLookback) &&
         Objects.equals(splitOpenFileCost, that.splitOpenFileCost);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(table().name(), taskSetID, splitSize, splitSize, splitOpenFileCost);
+    return Objects.hash(table().name(), taskSetID, readSplitSize, planTargetSize, splitOpenFileCost);
   }
 
   @Override
