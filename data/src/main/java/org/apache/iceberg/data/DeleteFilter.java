@@ -55,6 +55,7 @@ import org.apache.iceberg.util.Filter;
 import org.apache.iceberg.util.StructLikeSet;
 import org.apache.iceberg.util.StructProjection;
 import org.apache.parquet.Preconditions;
+import org.roaringbitmap.longlong.Roaring64Bitmap;
 
 public abstract class DeleteFilter<T> {
   private static final long DEFAULT_SET_FILTER_THRESHOLD = 100_000L;
@@ -68,6 +69,8 @@ public abstract class DeleteFilter<T> {
   private final List<DeleteFile> eqDeletes;
   private final Schema requiredSchema;
   private final Accessor<StructLike> posAccessor;
+
+  private Roaring64Bitmap posDeleteRowIds = null;
 
   protected DeleteFilter(FileScanTask task, Schema tableSchema, Schema requestedSchema) {
     this.setFilterThreshold = DEFAULT_SET_FILTER_THRESHOLD;
@@ -96,6 +99,10 @@ public abstract class DeleteFilter<T> {
 
   public Schema requiredSchema() {
     return requiredSchema;
+  }
+
+  public boolean hasPosDeletes() {
+    return !posDeletes.isEmpty();
   }
 
   Accessor<StructLike> posAccessor() {
@@ -183,6 +190,18 @@ public abstract class DeleteFilter<T> {
     };
 
     return remainingRowsFilter.filter(records);
+  }
+
+  public Roaring64Bitmap posDeletedRowIds() {
+    if (posDeletes.isEmpty()) {
+      return null;
+    }
+
+    if (posDeleteRowIds == null) {
+      List<CloseableIterable<Record>> deletes = Lists.transform(posDeletes, this::openPosDeletes);
+      posDeleteRowIds = Deletes.toPositionBitMap(dataFile.path(), CloseableIterable.concat(deletes));
+    }
+    return posDeleteRowIds;
   }
 
   private CloseableIterable<T> applyPosDeletes(CloseableIterable<T> records) {

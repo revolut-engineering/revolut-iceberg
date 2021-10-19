@@ -20,4 +20,7 @@
 package org.apache.iceberg.spark.source;
 
 public class TestSparkReaderDeletes3 extends TestSparkReaderDeletes {
+  public TestSparkReaderDeletes3(boolean vectorized) {
+    super(vectorized);
+  }
 }

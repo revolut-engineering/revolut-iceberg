@@ -170,11 +170,11 @@ abstract class SparkBatchScan implements Scan, Batch, SupportsReportStatistics {
 
     boolean onlyPrimitives = expectedSchema.columns().stream().allMatch(c -> c.type().isPrimitiveType());
 
-    boolean hasNoDeleteFiles = tasks().stream().noneMatch(TableScanUtil::hasDeletes);
+    boolean hasNoEqDeleteFiles = tasks().stream().noneMatch(TableScanUtil::hasEqDeletes);
 
     boolean batchReadsEnabled = batchReadsEnabled(allParquetFileScanTasks, allOrcFileScanTasks);
 
-    boolean readUsingBatch = batchReadsEnabled && hasNoDeleteFiles && (allOrcFileScanTasks ||
+    boolean readUsingBatch = batchReadsEnabled && hasNoEqDeleteFiles && (allOrcFileScanTasks ||
         (allParquetFileScanTasks && atLeastOneColumn && onlyPrimitives));
 
     int batchSize = readUsingBatch ? batchSize(allParquetFileScanTasks, allOrcFileScanTasks) : 0;

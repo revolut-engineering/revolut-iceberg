@@ -204,8 +204,8 @@ class Reader implements DataSourceReader, SupportsScanColumnarBatch, SupportsPus
     Preconditions.checkState(batchSize > 0, "Invalid batch size");
     String expectedSchemaString = SchemaParser.toJson(lazySchema());
 
-    ValidationException.check(tasks().stream().noneMatch(TableScanUtil::hasDeletes),
-        "Cannot scan table %s: cannot apply required delete files", table);
+    ValidationException.check(tasks().stream().noneMatch(TableScanUtil::hasEqDeletes),
+        "Cannot scan table %s: cannot apply required equality delete files", table);
 
     // broadcast the table metadata as input partitions will be sent to executors
     Broadcast<Table> tableBroadcast = sparkContext.broadcast(SerializableTable.copyOf(table));
@@ -335,11 +335,11 @@ class Reader implements DataSourceReader, SupportsScanColumnarBatch, SupportsPus
 
       boolean onlyPrimitives = lazySchema().columns().stream().allMatch(c -> c.type().isPrimitiveType());
 
-      boolean hasNoDeleteFiles = tasks().stream().noneMatch(TableScanUtil::hasDeletes);
+      boolean hasNoEqDeleteFiles = tasks().stream().noneMatch(TableScanUtil::hasEqDeletes);
 
       boolean batchReadsEnabled = batchReadsEnabled(allParquetFileScanTasks, allOrcFileScanTasks);
 
-      this.readUsingBatch = batchReadsEnabled && hasNoDeleteFiles && (allOrcFileScanTasks ||
+      this.readUsingBatch = batchReadsEnabled && hasNoEqDeleteFiles && (allOrcFileScanTasks ||
           (allParquetFileScanTasks && atLeastOneColumn && onlyPrimitives));
 
       if (readUsingBatch) {

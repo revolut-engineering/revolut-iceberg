@@ -59,14 +59,30 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREURIS;
 
+@RunWith(Parameterized.class)
 public abstract class TestSparkReaderDeletes extends DeleteReadTests {
 
   private static TestHiveMetastore metastore = null;
   protected static SparkSession spark = null;
   protected static HiveCatalog catalog = null;
+  private final boolean vectorized;
+
+  public TestSparkReaderDeletes(boolean vectorized) {
+    this.vectorized = vectorized;
+  }
+
+  @Parameterized.Parameters(name = "vectorized = {0}")
+  public static Object[][] parameters() {
+    return new Object[][] {
+        new Object[] {false},
+        new Object[] {true}
+    };
+  }
 
   @BeforeClass
   public static void startMetastoreAndSpark() {
@@ -106,7 +122,12 @@ public abstract class TestSparkReaderDeletes extends DeleteReadTests {
     TableOperations ops = ((BaseTable) table).operations();
     TableMetadata meta = ops.current();
     ops.commit(meta, meta.upgradeToFormatVersion(2));
-
+    if (vectorized) {
+      table.updateProperties()
+          .set(TableProperties.PARQUET_VECTORIZATION_ENABLED, "true")
+          .set(TableProperties.PARQUET_BATCH_SIZE, "4") // split 7 records to two batches to cover more code paths
+          .commit();
+    }
     return table;
   }
 

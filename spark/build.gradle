@@ -60,6 +60,8 @@ project(':iceberg-spark') {
       exclude group: 'com.google.code.findbugs', module: 'jsr305'
     }
 
+    implementation "org.roaringbitmap:RoaringBitmap"
+
     testImplementation("org.apache.hadoop:hadoop-minicluster") {
       exclude group: 'org.apache.avro', module: 'avro'
     }
