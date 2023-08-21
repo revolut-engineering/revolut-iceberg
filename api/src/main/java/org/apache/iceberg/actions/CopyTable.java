@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.actions;
 
 import org.apache.iceberg.Table;
@@ -24,7 +23,8 @@ import org.apache.iceberg.Table;
 public interface CopyTable extends Action<CopyTable, CopyTable.Result> {
 
   /**
-   * Passes the source and target prefixes that will be used to replace the source prefix with the target one.
+   * Passes the source and target prefixes that will be used to replace the source prefix with the
+   * target one.
    *
    * @param sourcePrefix the source prefix to be replaced
    * @param targetPrefix the target prefix
@@ -33,30 +33,33 @@ public interface CopyTable extends Action<CopyTable, CopyTable.Result> {
   CopyTable rewriteLocationPrefix(String sourcePrefix, String targetPrefix);
 
   /**
-   * Pass the version copied last time. It is optional if the target table is provided. The default value is the target
-   * table's current version. User needs to make sure whether the start version is valid if target table is not
-   * provided.
+   * Pass the version copied last time. It is optional if the target table is provided. The default
+   * value is the target table's current version. User needs to make sure whether the start version
+   * is valid if target table is not provided.
    *
-   * @param lastCopiedVersion only version file name is needed, not the metadata json file path. For example, the
-   *                          version file would be "v2.metadata.json" for a Hadoop table. For metastore tables, the
-   *                          version file would be like "00001-8893aa9e-f92e-4443-80e7-cfa42238a654.metadata.json".
+   * @param lastCopiedVersion only version file name is needed, not the metadata json file path. For
+   *     example, the version file would be "v2.metadata.json" for a Hadoop table. For metastore
+   *     tables, the version file would be like
+   *     "00001-8893aa9e-f92e-4443-80e7-cfa42238a654.metadata.json".
    * @return this for method chaining
    */
   CopyTable lastCopiedVersion(String lastCopiedVersion);
 
   /**
-   * The latest version of the table to copy. It is optional, the default value is the source table's current version.
+   * The latest version of the table to copy. It is optional, the default value is the source
+   * table's current version.
    *
-   * @param endVersion only version file name is needed, not the metadata json file path. For example, the version
-   *                   file would be "v2.metadata.json" for a Hadoop table. For metastore tables, the version file
-   *                   would be like "00001-8893aa9e-f92e-4443-80e7-cfa42238a654.metadata.json".
+   * @param endVersion only version file name is needed, not the metadata json file path. For
+   *     example, the version file would be "v2.metadata.json" for a Hadoop table. For metastore
+   *     tables, the version file would be like
+   *     "00001-8893aa9e-f92e-4443-80e7-cfa42238a654.metadata.json".
    * @return this for method chaining
    */
   CopyTable endVersion(String endVersion);
 
   /**
-   * Set the customized staging location. It is optional. By default, staging location is a sub directory under table's
-   * metadata directory.
+   * Set the customized staging location. It is optional. By default, staging location is a sub
+   * directory under table's metadata directory.
    *
    * @param stagingLocation the staging location
    * @return this for method chaining
@@ -71,24 +74,15 @@ public interface CopyTable extends Action<CopyTable, CopyTable.Result> {
    */
   CopyTable targetTable(Table targetTable);
 
-  /**
-   * The action result that contains a summary of the execution.
-   */
+  /** The action result that contains a summary of the execution. */
   interface Result {
-    /**
-     * Return directory of data files list.
-     */
+    /** Return directory of data files list. */
     String dataFileListLocation();
 
-    /**
-     * Return directory of metadata files list.
-     */
+    /** Return directory of metadata files list. */
     String metadataFileListLocation();
 
-    /**
-     * Return the latest version
-     */
+    /** Return the latest version */
     String latestVersion();
   }
 }
-

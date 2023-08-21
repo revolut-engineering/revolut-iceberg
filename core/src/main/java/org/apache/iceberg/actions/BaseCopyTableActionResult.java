@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.actions;
 
 public class BaseCopyTableActionResult implements CopyTable.Result {
@@ -24,7 +23,8 @@ public class BaseCopyTableActionResult implements CopyTable.Result {
   private final String dataFileListPath;
   private final String metadataFileListPath;
 
-  public BaseCopyTableActionResult(String dataFileListPath, String metadataFileListPath, String latestVersion) {
+  public BaseCopyTableActionResult(
+      String dataFileListPath, String metadataFileListPath, String latestVersion) {
     this.dataFileListPath = dataFileListPath;
     this.metadataFileListPath = metadataFileListPath;
     this.latestVersion = latestVersion;

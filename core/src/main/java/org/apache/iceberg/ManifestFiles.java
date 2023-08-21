@@ -35,10 +35,10 @@ import org.apache.iceberg.relocated.com.google.common.annotations.VisibleForTest
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+import org.apache.iceberg.util.Pair;
 import org.apache.iceberg.util.PropertyUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.iceberg.util.Pair;
 
 public class ManifestFiles {
   private ManifestFiles() {}
@@ -98,7 +98,8 @@ public class ManifestFiles {
         entry -> entry.file().path().toString());
   }
 
-  public static CloseableIterable<Pair<String, Long>> readPathsWithSnapshotId(ManifestFile manifest, FileIO io) {
+  public static CloseableIterable<Pair<String, Long>> readPathsWithSnapshotId(
+      ManifestFile manifest, FileIO io) {
     return CloseableIterable.transform(
         read(manifest, io, null).select(ImmutableList.of("file_path", "snapshot_id")).liveEntries(),
         entry -> Pair.of(entry.file().path().toString(), entry.snapshotId()));

@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.actions;
 
 public class BaseRemoveExpiredFilesActionResult implements RemoveExpiredFiles.Result {
@@ -24,8 +23,8 @@ public class BaseRemoveExpiredFilesActionResult implements RemoveExpiredFiles.Re
   private final long deletedManifestsCount;
   private final long deletedManifestListsCount;
 
-  public BaseRemoveExpiredFilesActionResult(long deletedDataFilesCount, long deletedManifestsCount,
-      long deletedManifestListsCount) {
+  public BaseRemoveExpiredFilesActionResult(
+      long deletedDataFilesCount, long deletedManifestsCount, long deletedManifestListsCount) {
     this.deletedDataFilesCount = deletedDataFilesCount;
     this.deletedManifestsCount = deletedManifestsCount;
     this.deletedManifestListsCount = deletedManifestListsCount;

@@ -29,18 +29,18 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 public class ManifestLists {
-  private ManifestLists() {
-  }
+  private ManifestLists() {}
 
   public static List<ManifestFile> read(InputFile manifestList) {
-    try (CloseableIterable<ManifestFile> files = Avro.read(manifestList)
-        .rename("manifest_file", GenericManifestFile.class.getName())
-        .rename("partitions", GenericPartitionFieldSummary.class.getName())
-        .rename("r508", GenericPartitionFieldSummary.class.getName())
-        .classLoader(GenericManifestFile.class.getClassLoader())
-        .project(ManifestFile.schema())
-        .reuseContainers(false)
-        .build()) {
+    try (CloseableIterable<ManifestFile> files =
+        Avro.read(manifestList)
+            .rename("manifest_file", GenericManifestFile.class.getName())
+            .rename("partitions", GenericPartitionFieldSummary.class.getName())
+            .rename("r508", GenericPartitionFieldSummary.class.getName())
+            .classLoader(GenericManifestFile.class.getClassLoader())
+            .project(ManifestFile.schema())
+            .reuseContainers(false)
+            .build()) {
 
       return Lists.newLinkedList(files);
 
@@ -50,8 +50,12 @@ public class ManifestLists {
     }
   }
 
-  public static ManifestListWriter write(int formatVersion, OutputFile manifestListFile,
-                                         long snapshotId, Long parentSnapshotId, long sequenceNumber) {
+  public static ManifestListWriter write(
+      int formatVersion,
+      OutputFile manifestListFile,
+      long snapshotId,
+      Long parentSnapshotId,
+      long sequenceNumber) {
     switch (formatVersion) {
       case 1:
         Preconditions.checkArgument(

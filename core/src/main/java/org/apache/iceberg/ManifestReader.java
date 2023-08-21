@@ -203,9 +203,9 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
   }
 
   public CloseableIterable<ManifestEntry<F>> entries() {
-    if ((rowFilter != null && rowFilter != Expressions.alwaysTrue()) ||
-        (partFilter != null && partFilter != Expressions.alwaysTrue()) ||
-        (partitionSet != null)) {
+    if ((rowFilter != null && rowFilter != Expressions.alwaysTrue())
+        || (partFilter != null && partFilter != Expressions.alwaysTrue())
+        || (partitionSet != null)) {
       Evaluator evaluator = evaluator();
       InclusiveMetricsEvaluator metricsEvaluator = metricsEvaluator();
 
