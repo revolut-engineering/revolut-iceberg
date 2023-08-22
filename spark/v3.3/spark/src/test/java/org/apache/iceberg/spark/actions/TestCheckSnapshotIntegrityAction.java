@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.spark.actions;
+
+import static org.apache.iceberg.types.Types.NestedField.optional;
 
 import java.io.File;
 import java.util.List;
@@ -49,22 +50,19 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import static org.apache.iceberg.types.Types.NestedField.optional;
-
 public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   private ActionsProvider actions() {
     return SparkActions.get();
   }
 
   private static final HadoopTables TABLES = new HadoopTables(new Configuration());
-  protected static final Schema SCHEMA = new Schema(
-      optional(1, "c1", Types.IntegerType.get()),
-      optional(2, "c2", Types.StringType.get()),
-      optional(3, "c3", Types.StringType.get())
-  );
+  protected static final Schema SCHEMA =
+      new Schema(
+          optional(1, "c1", Types.IntegerType.get()),
+          optional(2, "c2", Types.StringType.get()),
+          optional(3, "c3", Types.StringType.get()));
 
-  @Rule
-  public TemporaryFolder temp = new TemporaryFolder();
+  @Rule public TemporaryFolder temp = new TemporaryFolder();
   private File tableDir = null;
   protected String tableLocation = null;
   private Table table = null;
@@ -80,7 +78,8 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   public void testCheckSnapshotIntegrity() {
     List<String> validFiles = validFiles();
 
-    String metadataPath = ((HasTableOperations) table).operations().current().metadataFileLocation();
+    String metadataPath =
+        ((HasTableOperations) table).operations().current().metadataFileLocation();
     String startVersionFile = tableLocation + "metadata/v1.metadata.json";
     Table startTable = newStaticTable(startVersionFile, table.io());
     CheckSnapshotIntegrity.Result result =
@@ -104,7 +103,8 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   public void testStartFromFirstSnapshot() {
     List<String> validFiles = validFiles();
 
-    String metadataPath = ((HasTableOperations) table).operations().current().metadataFileLocation();
+    String metadataPath =
+        ((HasTableOperations) table).operations().current().metadataFileLocation();
 
     String startVersionFile = tableLocation + "metadata/v2.metadata.json";
     Table startTable = newStaticTable(startVersionFile, table.io());
@@ -130,8 +130,10 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
     CheckSnapshotIntegrity actions = actions().checkSnapshotIntegrity(table);
 
     AssertHelpers.assertThrows("", IllegalArgumentException.class, () -> actions.targetVersion(""));
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, () -> actions.targetVersion(null));
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, () -> actions.targetVersion("invalid"));
+    AssertHelpers.assertThrows(
+        "", IllegalArgumentException.class, () -> actions.targetVersion(null));
+    AssertHelpers.assertThrows(
+        "", IllegalArgumentException.class, () -> actions.targetVersion("invalid"));
 
     // either version file name or path are valid
     String versionFilePath = currentMetadata(table).metadataFileLocation();
@@ -141,7 +143,8 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   }
 
   private void checkMissingFiles(int num, CheckSnapshotIntegrity.Result result) {
-    Assert.assertEquals("Missing file count should be", num, ((Set) result.missingFileLocations()).size());
+    Assert.assertEquals(
+        "Missing file count should be", num, ((Set) result.missingFileLocations()).size());
   }
 
   private Table newStaticTable(String metadataFileLocation, FileIO io) {
@@ -154,7 +157,9 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   }
 
   private List<String> validFiles(String location) {
-    return spark.read().format("iceberg")
+    return spark
+        .read()
+        .format("iceberg")
         .load(location + "#files")
         .select("file_path")
         .as(Encoders.STRING())
@@ -170,20 +175,16 @@ public class TestCheckSnapshotIntegrityAction extends SparkTestBase {
   }
 
   private Table createTableWithSnapshots(String tblLocation, int snapshotNumber) {
-    Table tbl = TABLES.create(SCHEMA, PartitionSpec.unpartitioned(), Maps.newHashMap(), tblLocation);
+    Table tbl =
+        TABLES.create(SCHEMA, PartitionSpec.unpartitioned(), Maps.newHashMap(), tblLocation);
 
-    List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA")
-    );
+    List<ThreeColumnRecord> records =
+        Lists.newArrayList(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
 
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).coalesce(1);
 
     for (int i = 0; i < snapshotNumber; i++) {
-      df.select("c1", "c2", "c3")
-          .write()
-          .format("iceberg")
-          .mode("append")
-          .save(tblLocation);
+      df.select("c1", "c2", "c3").write().format("iceberg").mode("append").save(tblLocation);
     }
 
     tbl.refresh();

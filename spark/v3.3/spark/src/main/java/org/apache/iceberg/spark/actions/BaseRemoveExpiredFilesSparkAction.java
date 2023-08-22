@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.spark.actions;
 
 import java.io.File;
@@ -41,10 +40,11 @@ import org.apache.spark.sql.functions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExpiredFiles, RemoveExpiredFiles.Result>
+public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExpiredFiles>
     implements RemoveExpiredFiles {
 
-  private static final Logger LOG = LoggerFactory.getLogger(BaseRemoveExpiredFilesSparkAction.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(BaseRemoveExpiredFilesSparkAction.class);
   private static final ExecutorService DEFAULT_EXECUTOR_SERVICE = null;
   private static final String DATA_FILE = "Data File";
   private static final String MANIFEST = "Manifest";
@@ -59,12 +59,13 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
   private AtomicLong manifestCount = new AtomicLong(0L);
   private AtomicLong manifestListCount = new AtomicLong(0L);
 
-  private final Consumer<String> deleteFunc = new Consumer<String>() {
-    @Override
-    public void accept(String file) {
-      table.io().deleteFile(file);
-    }
-  };
+  private final Consumer<String> deleteFunc =
+      new Consumer<String>() {
+        @Override
+        public void accept(String file) {
+          table.io().deleteFile(file);
+        }
+      };
 
   public BaseRemoveExpiredFilesSparkAction(SparkSession spark, Table table) {
     super(spark);
@@ -84,7 +85,9 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
 
   @Override
   public RemoveExpiredFiles targetVersion(String tVersion) {
-    Preconditions.checkArgument(tVersion != null && !tVersion.isEmpty(), "Target version file('%s') cannot be empty.",
+    Preconditions.checkArgument(
+        tVersion != null && !tVersion.isEmpty(),
+        "Target version file('%s') cannot be empty.",
         tVersion);
 
     String tVersionFile = tVersion;
@@ -92,7 +95,8 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
       tVersionFile = ((HasTableOperations) table).operations().metadataFileLocation(tVersionFile);
     }
 
-    Preconditions.checkArgument(fileExist(tVersionFile), "Version file('%s') doesn't exist.", tVersionFile);
+    Preconditions.checkArgument(
+        fileExist(tVersionFile), "Version file('%s') doesn't exist.", tVersionFile);
     this.targetVersion = tVersionFile;
     return this;
   }
@@ -104,7 +108,8 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
   }
 
   private String jobDesc() {
-    return String.format("Remove expired files in version '%s' of table %s.", targetVersion, table.name());
+    return String.format(
+        "Remove expired files in version '%s' of table %s.", targetVersion, table.name());
   }
 
   private RemoveExpiredFiles.Result doExecute() {
@@ -112,7 +117,8 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
 
     deleteFiles(expiredFiles().collectAsList().iterator());
 
-    return new BaseRemoveExpiredFilesActionResult(dataFileCount.get(), manifestCount.get(), manifestListCount.get());
+    return new BaseRemoveExpiredFilesActionResult(
+        dataFileCount.get(), manifestCount.get(), manifestListCount.get());
   }
 
   private Dataset<Row> expiredFiles() {
@@ -138,34 +144,40 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
 
   private void deleteFiles(Iterator<Row> filesToDelete) {
     Tasks.foreach(filesToDelete)
-        .retry(3).stopRetryOn(NotFoundException.class).suppressFailureWhenFinished()
+        .retry(3)
+        .stopRetryOn(NotFoundException.class)
+        .suppressFailureWhenFinished()
         .executeWith(executorService)
-        .onFailure((fileInfo, exc) -> {
-          String file = fileInfo.getString(0);
-          String type = fileInfo.getString(1);
-          LOG.warn("Delete failed for {}: {}", type, file, exc);
-        })
-        .run(fileInfo -> {
-          String file = fileInfo.getString(0);
-          String type = fileInfo.getString(1);
-          deleteFunc.accept(file);
-          switch (type) {
-            case DATA_FILE:
-              dataFileCount.incrementAndGet();
-              LOG.trace("Deleted Data File: {}", file);
-              break;
-            case MANIFEST:
-              manifestCount.incrementAndGet();
-              LOG.debug("Deleted Manifest: {}", file);
-              break;
-            case MANIFEST_LIST:
-              manifestListCount.incrementAndGet();
-              LOG.debug("Deleted Manifest List: {}", file);
-              break;
-          }
-        });
+        .onFailure(
+            (fileInfo, exc) -> {
+              String file = fileInfo.getString(0);
+              String type = fileInfo.getString(1);
+              LOG.warn("Delete failed for {}: {}", type, file, exc);
+            })
+        .run(
+            fileInfo -> {
+              String file = fileInfo.getString(0);
+              String type = fileInfo.getString(1);
+              deleteFunc.accept(file);
+              switch (type) {
+                case DATA_FILE:
+                  dataFileCount.incrementAndGet();
+                  LOG.trace("Deleted Data File: {}", file);
+                  break;
+                case MANIFEST:
+                  manifestCount.incrementAndGet();
+                  LOG.debug("Deleted Manifest: {}", file);
+                  break;
+                case MANIFEST_LIST:
+                  manifestListCount.incrementAndGet();
+                  LOG.debug("Deleted Manifest List: {}", file);
+                  break;
+              }
+            });
 
-    LOG.info("Deleted {} total files", dataFileCount.get() + manifestCount.get() + manifestListCount.get());
+    LOG.info(
+        "Deleted {} total files",
+        dataFileCount.get() + manifestCount.get() + manifestListCount.get());
   }
 
   private boolean fileExist(String path) {
@@ -175,4 +187,3 @@ public class BaseRemoveExpiredFilesSparkAction extends BaseSparkAction<RemoveExp
     return table.io().newInputFile(path).exists();
   }
 }
-

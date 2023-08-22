@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.spark.actions;
 
 import java.io.File;
@@ -40,10 +39,11 @@ import org.apache.spark.sql.SparkSession;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BaseCheckSnapshotIntegritySparkAction
-    extends BaseSparkAction<CheckSnapshotIntegrity, CheckSnapshotIntegrity.Result> implements CheckSnapshotIntegrity {
+public class BaseCheckSnapshotIntegritySparkAction extends BaseSparkAction<CheckSnapshotIntegrity>
+    implements CheckSnapshotIntegrity {
 
-  private static final Logger LOG = LoggerFactory.getLogger(BaseCheckSnapshotIntegritySparkAction.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(BaseCheckSnapshotIntegritySparkAction.class);
   private static final ExecutorService DEFAULT_EXECUTOR_SERVICE = null;
 
   private final Table table;
@@ -52,19 +52,20 @@ public class BaseCheckSnapshotIntegritySparkAction
   private String targetVersion;
   private Table targetTable;
 
-  private Consumer<String> validateFunc = new Consumer<String>() {
-    @Override
-    public void accept(String file) {
-      try {
-        if (!table.io().newInputFile(file).exists()) {
-          missingFiles.add(file);
+  private Consumer<String> validateFunc =
+      new Consumer<String>() {
+        @Override
+        public void accept(String file) {
+          try {
+            if (!table.io().newInputFile(file).exists()) {
+              missingFiles.add(file);
+            }
+          } catch (Exception e) {
+            LOG.warn("Failed to check the existence of file: {}. Marking it as missing.", file, e);
+            missingFiles.add(file);
+          }
         }
-      } catch (Exception e) {
-        LOG.warn("Failed to check the existence of file: {}. Marking it as missing.", file, e);
-        missingFiles.add(file);
-      }
-    }
-  };
+      };
 
   public BaseCheckSnapshotIntegritySparkAction(SparkSession spark, Table table) {
     super(spark);
@@ -84,7 +85,9 @@ public class BaseCheckSnapshotIntegritySparkAction
 
   @Override
   public CheckSnapshotIntegrity targetVersion(String tVersion) {
-    Preconditions.checkArgument(tVersion != null && !tVersion.isEmpty(), "Target version file('%s') cannot be empty.",
+    Preconditions.checkArgument(
+        tVersion != null && !tVersion.isEmpty(),
+        "Target version file('%s') cannot be empty.",
         tVersion);
 
     String tVersionFile = tVersion;
@@ -92,7 +95,8 @@ public class BaseCheckSnapshotIntegritySparkAction
       tVersionFile = ((HasTableOperations) table).operations().metadataFileLocation(tVersionFile);
     }
 
-    Preconditions.checkArgument(fileExist(tVersionFile), "Version file('%s') doesn't exist.", tVersionFile);
+    Preconditions.checkArgument(
+        fileExist(tVersionFile), "Version file('%s') doesn't exist.", tVersionFile);
     this.targetVersion = tVersionFile;
     return this;
   }
@@ -104,7 +108,8 @@ public class BaseCheckSnapshotIntegritySparkAction
   }
 
   private String jobDesc() {
-    return String.format("Checking integrity of version '%s' of table %s.", targetVersion, table.name());
+    return String.format(
+        "Checking integrity of version '%s' of table %s.", targetVersion, table.name());
   }
 
   private CheckSnapshotIntegrity.Result doExecute() {

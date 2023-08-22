@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.spark.actions;
+
+import static org.apache.iceberg.types.Types.NestedField.optional;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,22 +55,19 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import static org.apache.iceberg.types.Types.NestedField.optional;
-
 public class TestCopyTableAction extends SparkTestBase {
   protected ActionsProvider actions() {
     return SparkActions.get();
   }
 
   private static final HadoopTables TABLES = new HadoopTables(new Configuration());
-  protected static final Schema SCHEMA = new Schema(
-      optional(1, "c1", Types.IntegerType.get()),
-      optional(2, "c2", Types.StringType.get()),
-      optional(3, "c3", Types.StringType.get())
-  );
+  protected static final Schema SCHEMA =
+      new Schema(
+          optional(1, "c1", Types.IntegerType.get()),
+          optional(2, "c2", Types.StringType.get()),
+          optional(3, "c3", Types.StringType.get()));
 
-  @Rule
-  public TemporaryFolder temp = new TemporaryFolder();
+  @Rule public TemporaryFolder temp = new TemporaryFolder();
   private File tableDir = null;
   protected String tableLocation = null;
   private Table table = null;
@@ -89,21 +87,17 @@ public class TestCopyTableAction extends SparkTestBase {
     return createTableWithSnapshots(location, snapshotNumber, Maps.newHashMap());
   }
 
-  protected Table createTableWithSnapshots(String location, int snapshotNumber, Map<String, String> properties) {
+  protected Table createTableWithSnapshots(
+      String location, int snapshotNumber, Map<String, String> properties) {
     Table newTable = TABLES.create(SCHEMA, PartitionSpec.unpartitioned(), properties, location);
 
-    List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA")
-    );
+    List<ThreeColumnRecord> records =
+        Lists.newArrayList(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
 
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).coalesce(1);
 
     for (int i = 0; i < snapshotNumber; i++) {
-      df.select("c1", "c2", "c3")
-          .write()
-          .format("iceberg")
-          .mode("append")
-          .save(location);
+      df.select("c1", "c2", "c3").write().format("iceberg").mode("append").save(location);
     }
 
     return newTable;
@@ -114,17 +108,22 @@ public class TestCopyTableAction extends SparkTestBase {
     String targetTableLocation = newTableLocation();
 
     // check the data file location before the rebuild
-    List<String> validDataFiles = spark.read().format("iceberg")
-        .load(tableLocation + "#files")
-        .select("file_path")
-        .as(Encoders.STRING())
-        .collectAsList();
+    List<String> validDataFiles =
+        spark
+            .read()
+            .format("iceberg")
+            .load(tableLocation + "#files")
+            .select("file_path")
+            .as(Encoders.STRING())
+            .collectAsList();
     Assert.assertEquals("Should be 2 valid data files", 2, validDataFiles.size());
 
-    CopyTable.Result result = actions().copyTable(table)
-        .rewriteLocationPrefix(tableLocation, targetTableLocation)
-        .endVersion("v3.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(table)
+            .rewriteLocationPrefix(tableLocation, targetTableLocation)
+            .endVersion("v3.metadata.json")
+            .execute();
 
     Assert.assertEquals("The latest version should be", "v3.metadata.json", result.latestVersion());
 
@@ -135,21 +134,24 @@ public class TestCopyTableAction extends SparkTestBase {
     moveTableFiles(tableLocation, targetTableLocation, stagingDir(result));
 
     // verify the data file path after the rebuild
-    List<String> validDataFilesAfterRebuilt = spark.read().format("iceberg")
-        .load(targetTableLocation + "#files")
-        .select("file_path")
-        .as(Encoders.STRING())
-        .collectAsList();
+    List<String> validDataFilesAfterRebuilt =
+        spark
+            .read()
+            .format("iceberg")
+            .load(targetTableLocation + "#files")
+            .select("file_path")
+            .as(Encoders.STRING())
+            .collectAsList();
     Assert.assertEquals("Should be 2 valid data files", 2, validDataFilesAfterRebuilt.size());
     for (String item : validDataFilesAfterRebuilt) {
-      Assert.assertTrue("Data file should point to the new location", item.startsWith(targetTableLocation));
+      Assert.assertTrue(
+          "Data file should point to the new location", item.startsWith(targetTableLocation));
     }
 
     // verify data rows
     Dataset<Row> resultDF = spark.read().format("iceberg").load(targetTableLocation);
-    List<ThreeColumnRecord> actualRecords = resultDF.sort("c1", "c2", "c3")
-        .as(Encoders.bean(ThreeColumnRecord.class))
-        .collectAsList();
+    List<ThreeColumnRecord> actualRecords =
+        resultDF.sort("c1", "c2", "c3").as(Encoders.bean(ThreeColumnRecord.class)).collectAsList();
 
     List<ThreeColumnRecord> expectedRecords = Lists.newArrayList();
     expectedRecords.add(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
@@ -160,15 +162,22 @@ public class TestCopyTableAction extends SparkTestBase {
 
   @Test
   public void testDataFilesDiff() throws Exception {
-    CopyTable.Result result = actions().copyTable(table)
-        .rewriteLocationPrefix(tableLocation, newTableLocation())
-        .lastCopiedVersion("v2.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(table)
+            .rewriteLocationPrefix(tableLocation, newTableLocation())
+            .lastCopiedVersion("v2.metadata.json")
+            .execute();
 
     checkDataFileNum(1, result);
 
     List<String> rebuiltFiles =
-        spark.read().format("text").load(result.metadataFileListLocation()).as(Encoders.STRING()).collectAsList();
+        spark
+            .read()
+            .format("text")
+            .load(result.metadataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
 
     // v3.metadata.json, one manifest-list file, one manifest file
     checkMetadataFileNum(3, result);
@@ -188,19 +197,23 @@ public class TestCopyTableAction extends SparkTestBase {
   public void testTableWith3Snapshots() throws Exception {
     String location = newTableLocation();
     Table tableWith3Snaps = createTableWithSnapshots(location, 3);
-    CopyTable.Result result = actions().copyTable(tableWith3Snaps)
-        .rewriteLocationPrefix(location, newTableLocation())
-        .lastCopiedVersion("v2.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(tableWith3Snaps)
+            .rewriteLocationPrefix(location, newTableLocation())
+            .lastCopiedVersion("v2.metadata.json")
+            .execute();
 
     checkMetadataFileNum(2, 2, 2, result);
     checkDataFileNum(2, result);
 
     // start from the first version
-    CopyTable.Result result1 = actions().copyTable(tableWith3Snaps)
-        .rewriteLocationPrefix(location, newTableLocation())
-        .lastCopiedVersion("v1.metadata.json")
-        .execute();
+    CopyTable.Result result1 =
+        actions()
+            .copyTable(tableWith3Snaps)
+            .rewriteLocationPrefix(location, newTableLocation())
+            .lastCopiedVersion("v1.metadata.json")
+            .execute();
 
     checkMetadataFileNum(3, 3, 3, result1);
     checkDataFileNum(3, result1);
@@ -208,9 +221,11 @@ public class TestCopyTableAction extends SparkTestBase {
 
   @Test
   public void testFullTableCopy() throws Exception {
-    CopyTable.Result result = actions().copyTable(table)
-        .rewriteLocationPrefix(tableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(table)
+            .rewriteLocationPrefix(tableLocation, newTableLocation())
+            .execute();
 
     checkMetadataFileNum(3, 2, 2, result);
     checkDataFileNum(2, result);
@@ -220,18 +235,20 @@ public class TestCopyTableAction extends SparkTestBase {
   public void testDeleteDataFile() throws Exception {
     String location = newTableLocation();
     Table sourceTable = createATableWith2Snapshots(location);
-    List<String> validDataFiles = spark.read().format("iceberg")
-        .load(location + "#files")
-        .select("file_path")
-        .as(Encoders.STRING())
-        .collectAsList();
+    List<String> validDataFiles =
+        spark
+            .read()
+            .format("iceberg")
+            .load(location + "#files")
+            .select("file_path")
+            .as(Encoders.STRING())
+            .collectAsList();
 
     sourceTable.newDelete().deleteFile(validDataFiles.stream().findFirst().get()).commit();
 
     String targetLocation = newTableLocation();
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(location, targetLocation)
-        .execute();
+    CopyTable.Result result =
+        actions().copyTable(sourceTable).rewriteLocationPrefix(location, targetLocation).execute();
 
     checkMetadataFileNum(4, 3, 3, result);
     checkDataFileNum(2, result);
@@ -241,9 +258,10 @@ public class TestCopyTableAction extends SparkTestBase {
 
     // verify data rows
     Dataset<Row> resultDF = spark.read().format("iceberg").load(targetLocation);
-    Assert.assertEquals("There are only one row left since we deleted a data file", 1, resultDF
-        .as(Encoders.bean(ThreeColumnRecord.class))
-        .count());
+    Assert.assertEquals(
+        "There are only one row left since we deleted a data file",
+        1,
+        resultDF.as(Encoders.bean(ThreeColumnRecord.class)).count());
   }
 
   @Test
@@ -252,29 +270,28 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createTableWithSnapshots(location, 2);
     // expire the first snapshot
     Table staticTable = newStaticTable(location + "metadata/v2.metadata.json", table.io());
-    actions().expireSnapshots(sourceTable)
+    actions()
+        .expireSnapshots(sourceTable)
         .expireSnapshotId(staticTable.currentSnapshot().snapshotId())
         .execute();
 
     // create 100 more snapshots
-    List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA")
-    );
+    List<ThreeColumnRecord> records =
+        Lists.newArrayList(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).coalesce(1);
     for (int i = 0; i < 100; i++) {
-      df.select("c1", "c2", "c3")
-          .write()
-          .format("iceberg")
-          .mode("append")
-          .save(location);
+      df.select("c1", "c2", "c3").write().format("iceberg").mode("append").save(location);
     }
     sourceTable.refresh();
 
-    // v1/v2/v3.metadata.json has been deleted in v104.metadata.json, and there is no way to find the first snapshot
+    // v1/v2/v3.metadata.json has been deleted in v104.metadata.json, and there is no way to find
+    // the first snapshot
     // from the version file history
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(location, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(location, newTableLocation())
+            .execute();
 
     // you can only find 101 snapshots but the manifest file and data file count should be 102.
     checkMetadataFileNum(101, 101, 101, result);
@@ -288,10 +305,12 @@ public class TestCopyTableAction extends SparkTestBase {
 
   @Test
   public void testRewriteTableWithoutSnapshot() throws Exception {
-    CopyTable.Result result = actions().copyTable(table)
-        .rewriteLocationPrefix(tableLocation, newTableLocation())
-        .endVersion("v1.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(table)
+            .rewriteLocationPrefix(tableLocation, newTableLocation())
+            .endVersion("v1.metadata.json")
+            .execute();
 
     // the only rebuilt file is v1.metadata.json since it contains no snapshot
     checkMetadataFileNum(1, result);
@@ -304,13 +323,16 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(sourceTableLocation);
 
     // expire one snapshot
-    actions().expireSnapshots(sourceTable)
+    actions()
+        .expireSnapshots(sourceTable)
         .expireSnapshotId(sourceTable.currentSnapshot().parentId())
         .execute();
 
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     checkMetadataFileNum(4, 1, 2, result);
 
@@ -323,16 +345,20 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(sourceTableLocation);
 
     // expire one snapshot
-    actions().expireSnapshots(sourceTable)
+    actions()
+        .expireSnapshots(sourceTable)
         .expireSnapshotId(sourceTable.currentSnapshot().parentId())
         .execute();
 
-    Assert.assertEquals("1 out 2 snapshot has been removed", 1, ((List) sourceTable.snapshots()).size());
+    Assert.assertEquals(
+        "1 out 2 snapshot has been removed", 1, ((List) sourceTable.snapshots()).size());
 
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .lastCopiedVersion("v2.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .lastCopiedVersion("v2.metadata.json")
+            .execute();
 
     // 2 metadata.json, 1 manifest list file, 1 manifest files
     checkMetadataFileNum(4, result);
@@ -345,15 +371,18 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(sourceTableLocation);
 
     // expire one snapshot
-    actions().expireSnapshots(sourceTable)
+    actions()
+        .expireSnapshots(sourceTable)
         .expireSnapshotId(sourceTable.currentSnapshot().parentId())
         .execute();
 
     // only move version v4, which is the version generated by snapshot expiration
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .lastCopiedVersion("v3.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .lastCopiedVersion("v3.metadata.json")
+            .execute();
 
     // only v4.metadata.json needs to move
     checkMetadataFileNum(1, result);
@@ -367,17 +396,20 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(sourceTableLocation);
 
     // expire one snapshot
-    actions().expireSnapshots(sourceTable)
+    actions()
+        .expireSnapshots(sourceTable)
         .expireSnapshotId(sourceTable.currentSnapshot().parentId())
         .execute();
 
     AssertHelpers.assertThrows(
         "Copy a version with invalid snapshots aren't allowed",
         UnsupportedOperationException.class,
-        () -> actions().copyTable(sourceTable)
-            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-            .endVersion("v3.metadata.json")
-            .execute());
+        () ->
+            actions()
+                .copyTable(sourceTable)
+                .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+                .endVersion("v3.metadata.json")
+                .execute());
   }
 
   @Test
@@ -387,28 +419,24 @@ public class TestCopyTableAction extends SparkTestBase {
     Long secondSnapshotId = sourceTable.currentSnapshot().snapshotId();
 
     // roll back to the first snapshot(v2)
-    sourceTable.rollback().toSnapshotId(sourceTable.currentSnapshot().parentId()).commit();
+    sourceTable.manageSnapshots().setCurrentSnapshot(sourceTable.currentSnapshot().parentId()).commit();
 
     // add a new snapshot
-    List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA")
-    );
+    List<ThreeColumnRecord> records =
+        Lists.newArrayList(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).coalesce(1);
-    df.select("c1", "c2", "c3")
-        .write()
-        .format("iceberg")
-        .mode("append")
-        .save(sourceTableLocation);
+    df.select("c1", "c2", "c3").write().format("iceberg").mode("append").save(sourceTableLocation);
 
     sourceTable.refresh();
 
     // roll back to the second snapshot(v3)
-    sourceTable.rollback().toSnapshotId(secondSnapshotId).commit();
-
+    sourceTable.manageSnapshots().setCurrentSnapshot(secondSnapshotId).commit();
     // copy table
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     // check the result
     checkMetadataFileNum(6, 3, 3, result);
@@ -420,28 +448,29 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(sourceTableLocation);
 
     // enable WAP
-    sourceTable.updateProperties().set(TableProperties.WRITE_AUDIT_PUBLISH_ENABLED, "true").commit();
+    sourceTable
+        .updateProperties()
+        .set(TableProperties.WRITE_AUDIT_PUBLISH_ENABLED, "true")
+        .commit();
     spark.conf().set("spark.wap.id", "1");
 
     // add a new snapshot without changing the current snapshot of the table
-    List<ThreeColumnRecord> records = Lists.newArrayList(
-        new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA")
-    );
+    List<ThreeColumnRecord> records =
+        Lists.newArrayList(new ThreeColumnRecord(1, "AAAAAAAAAA", "AAAA"));
     Dataset<Row> df = spark.createDataFrame(records, ThreeColumnRecord.class).coalesce(1);
-    df.select("c1", "c2", "c3")
-        .write()
-        .format("iceberg")
-        .mode("append")
-        .save(sourceTableLocation);
+    df.select("c1", "c2", "c3").write().format("iceberg").mode("append").save(sourceTableLocation);
 
     sourceTable.refresh();
 
     // copy table
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
-    // check the result. There are 3 snapshots in total, although the current snapshot is the second one.
+    // check the result. There are 3 snapshots in total, although the current snapshot is the second
+    // one.
     checkMetadataFileNum(5, 3, 3, result);
   }
 
@@ -454,9 +483,11 @@ public class TestCopyTableAction extends SparkTestBase {
     sourceTable.updateSchema().addColumn("c4", Types.StringType.get()).commit();
 
     // copy table
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     // check the result
     checkMetadataFileNum(4, 2, 2, result);
@@ -469,10 +500,12 @@ public class TestCopyTableAction extends SparkTestBase {
     String targetTableLocation = newTableLocation();
     Table targetTable = createATableWith2Snapshots(targetTableLocation);
 
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
-        .targetTable(targetTable)
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
+            .targetTable(targetTable)
+            .execute();
 
     Assert.assertEquals("The latest version should be", "v4.metadata.json", result.latestVersion());
 
@@ -487,13 +520,17 @@ public class TestCopyTableAction extends SparkTestBase {
     String targetTableLocation = newTableLocation();
     Table targetTable = createATableWith2Snapshots(targetTableLocation);
 
-    AssertHelpers.assertThrows("The valid start version should be v3", IllegalArgumentException.class,
+    AssertHelpers.assertThrows(
+        "The valid start version should be v3",
+        IllegalArgumentException.class,
         "The start version isn't the current version of the target table.",
-        () -> actions().copyTable(sourceTable)
-            .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
-            .targetTable(targetTable)
-            .lastCopiedVersion("v2.metadata.json")
-            .execute());
+        () ->
+            actions()
+                .copyTable(sourceTable)
+                .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
+                .targetTable(targetTable)
+                .lastCopiedVersion("v2.metadata.json")
+                .execute());
   }
 
   @Test
@@ -504,9 +541,11 @@ public class TestCopyTableAction extends SparkTestBase {
 
     Table sourceTable = createTableWithSnapshots(sourceTableLocation, 2, properties);
 
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     checkMetadataFileNum(7, result);
     checkDataFileNum(2, result);
@@ -519,18 +558,22 @@ public class TestCopyTableAction extends SparkTestBase {
     properties.put(TableProperties.METADATA_COMPRESSION, "gzip");
     Table sourceTable = createTableWithSnapshots(sourceTableLocation, 2, properties);
 
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .endVersion("v2.gz.metadata.json")
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .endVersion("v2.gz.metadata.json")
+            .execute();
 
     checkMetadataFileNum(4, result);
     checkDataFileNum(1, result);
 
-    result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .lastCopiedVersion("v1.gz.metadata.json")
-        .execute();
+    result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .lastCopiedVersion("v1.gz.metadata.json")
+            .execute();
 
     checkMetadataFileNum(6, result);
     checkDataFileNum(2, result);
@@ -540,53 +583,94 @@ public class TestCopyTableAction extends SparkTestBase {
   public void testInvalidArgs() {
     CopyTable actions = actions().copyTable(table);
 
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, "Source prefix('') cannot be empty",
+    AssertHelpers.assertThrows(
+        "",
+        IllegalArgumentException.class,
+        "Source prefix('') cannot be empty",
         () -> actions.rewriteLocationPrefix("", null));
 
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, "Source prefix('null') cannot be empty",
+    AssertHelpers.assertThrows(
+        "",
+        IllegalArgumentException.class,
+        "Source prefix('null') cannot be empty",
         () -> actions.rewriteLocationPrefix(null, null));
 
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, "Staging location('') cannot be empty",
+    AssertHelpers.assertThrows(
+        "",
+        IllegalArgumentException.class,
+        "Staging location('') cannot be empty",
         () -> actions.stagingLocation(""));
 
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, "Staging location('null') cannot be empty",
+    AssertHelpers.assertThrows(
+        "",
+        IllegalArgumentException.class,
+        "Staging location('null') cannot be empty",
         () -> actions.stagingLocation(null));
 
-    AssertHelpers.assertThrows("", IllegalArgumentException.class, "Last copied version('null') cannot be empty",
+    AssertHelpers.assertThrows(
+        "",
+        IllegalArgumentException.class,
+        "Last copied version('null') cannot be empty",
         () -> actions.lastCopiedVersion(null));
 
-    AssertHelpers.assertThrows("Last copied version cannot be empty", IllegalArgumentException.class,
+    AssertHelpers.assertThrows(
+        "Last copied version cannot be empty",
+        IllegalArgumentException.class,
         () -> actions.lastCopiedVersion(" "));
 
-    AssertHelpers.assertThrows("End version cannot be empty", IllegalArgumentException.class,
+    AssertHelpers.assertThrows(
+        "End version cannot be empty",
+        IllegalArgumentException.class,
         () -> actions.endVersion(" "));
 
-    AssertHelpers.assertThrows("End version cannot be empty", IllegalArgumentException.class,
+    AssertHelpers.assertThrows(
+        "End version cannot be empty",
+        IllegalArgumentException.class,
         () -> actions.endVersion(null));
   }
 
   protected void checkDataFileNum(long count, CopyTable.Result result) {
-    List<String> filesToMove  =
-        spark.read().format("text").load(result.dataFileListLocation()).as(Encoders.STRING()).collectAsList();
+    List<String> filesToMove =
+        spark
+            .read()
+            .format("text")
+            .load(result.dataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
     Assert.assertEquals("The rebuilt data file number should be", count, filesToMove.size());
   }
 
   protected void checkMetadataFileNum(int count, CopyTable.Result result) {
-    List<String> filesToMove  =
-        spark.read().format("text").load(result.metadataFileListLocation()).as(Encoders.STRING()).collectAsList();
+    List<String> filesToMove =
+        spark
+            .read()
+            .format("text")
+            .load(result.metadataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
     Assert.assertEquals("The rebuilt metadata file number should be", count, filesToMove.size());
   }
 
   protected void checkMetadataFileNum(
-      int versionFileCount, int manifestListCount,
-      int manifestFileCount, CopyTable.Result result) {
-    List<String> filesToMove  =
-            spark.read().format("text").load(result.metadataFileListLocation()).as(Encoders.STRING()).collectAsList();
-    Assert.assertEquals("The rebuilt version file number should be", versionFileCount,
+      int versionFileCount, int manifestListCount, int manifestFileCount, CopyTable.Result result) {
+    List<String> filesToMove =
+        spark
+            .read()
+            .format("text")
+            .load(result.metadataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
+    Assert.assertEquals(
+        "The rebuilt version file number should be",
+        versionFileCount,
         filesToMove.stream().filter(f -> f.endsWith(".metadata.json")).count());
-    Assert.assertEquals("The rebuilt Manifest list file number should be", manifestListCount,
+    Assert.assertEquals(
+        "The rebuilt Manifest list file number should be",
+        manifestListCount,
         filesToMove.stream().filter(f -> f.contains("snap-")).count());
-    Assert.assertEquals("The rebuilt Manifest file number should be", manifestFileCount,
+    Assert.assertEquals(
+        "The rebuilt Manifest file number should be",
+        manifestFileCount,
         filesToMove.stream().filter(f -> f.endsWith("-m0.avro")).count());
   }
 
@@ -599,9 +683,12 @@ public class TestCopyTableAction extends SparkTestBase {
     return temp.newFolder().toURI().toString();
   }
 
-  private void moveTableFiles(String sourceDir, String targetDir, String stagingDir) throws Exception {
-    FileUtils.copyDirectory(new File(removePrefix(sourceDir) + "data/"), new File(removePrefix(targetDir) + "/data/"));
-    FileUtils.copyDirectory(new File(removePrefix(stagingDir)), new File(removePrefix(targetDir) + "/metadata/"));
+  private void moveTableFiles(String sourceDir, String targetDir, String stagingDir)
+      throws Exception {
+    FileUtils.copyDirectory(
+        new File(removePrefix(sourceDir) + "data/"), new File(removePrefix(targetDir) + "/data/"));
+    FileUtils.copyDirectory(
+        new File(removePrefix(stagingDir)), new File(removePrefix(targetDir) + "/metadata/"));
   }
 
   private String removePrefix(String path) {
@@ -616,34 +703,41 @@ public class TestCopyTableAction extends SparkTestBase {
     String metadataFilePath = currentMetadata(sourceTable).metadataFileLocation();
 
     String newMetadataDir = "new-metadata-dir";
-    sourceTable.updateProperties().set(
-        TableProperties.WRITE_METADATA_LOCATION,
-        sourceTableLocation + newMetadataDir).commit();
+    sourceTable
+        .updateProperties()
+        .set(TableProperties.WRITE_METADATA_LOCATION, sourceTableLocation + newMetadataDir)
+        .commit();
 
     spark.sql("insert into hive.default.tbl values (1, 'AAAAAAAAAA', 'AAAA')");
     sourceTable.refresh();
 
     // copy table
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     checkMetadataFileNum(4, 2, 2, result);
     checkDataFileNum(2, result);
 
     // pick up a version from the old metadata dir as the end version
-    CopyTable.Result result1 = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .endVersion(fileName(metadataFilePath))
-        .execute();
+    CopyTable.Result result1 =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .endVersion(fileName(metadataFilePath))
+            .execute();
 
     checkMetadataFileNum(2, 1, 1, result1);
 
     // pick up a version from the old metadata dir as the last copied version
-    CopyTable.Result result2 = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .lastCopiedVersion(fileName(metadataFilePath))
-        .execute();
+    CopyTable.Result result2 =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .lastCopiedVersion(fileName(metadataFilePath))
+            .execute();
 
     checkMetadataFileNum(2, 1, 1, result2);
   }
@@ -653,26 +747,31 @@ public class TestCopyTableAction extends SparkTestBase {
     String sourceTableLocation = newTableLocation();
     Map<String, String> properties = Maps.newHashMap();
     properties.put(TableProperties.METADATA_COMPRESSION, "gzip");
-    Table sourceTable = createMetastoreTable(sourceTableLocation, properties, "testMetadataCompression", 2);
+    Table sourceTable =
+        createMetastoreTable(sourceTableLocation, properties, "testMetadataCompression", 2);
 
     TableMetadata currentMetadata = currentMetadata(sourceTable);
 
     // set the second version as the endVersion
     String endVersion = fileName(currentMetadata.previousFiles().get(1).file());
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .endVersion(endVersion)
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .endVersion(endVersion)
+            .execute();
 
     checkMetadataFileNum(4, result);
     checkDataFileNum(1, result);
 
     // set the first version as the lastCopiedVersion
     String firstVersion = fileName(currentMetadata.previousFiles().get(0).file());
-    result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .lastCopiedVersion(firstVersion)
-        .execute();
+    result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .lastCopiedVersion(firstVersion)
+            .execute();
 
     checkMetadataFileNum(6, result);
     checkDataFileNum(2, result);
@@ -689,7 +788,8 @@ public class TestCopyTableAction extends SparkTestBase {
     String metadataFilePath = currentMetadata(sourceTable).metadataFileLocation();
 
     String newMetadataDir = "new-data-dir";
-    sourceTable.updateProperties()
+    sourceTable
+        .updateProperties()
         .set(TableProperties.OBJECT_STORE_PATH, sourceTableLocation + newMetadataDir)
         .set(TableProperties.OBJECT_STORE_ENABLED, "true")
         .commit();
@@ -698,59 +798,85 @@ public class TestCopyTableAction extends SparkTestBase {
     sourceTable.refresh();
 
     // copy table
-    CopyTable.Result result = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
-        .execute();
+    CopyTable.Result result =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, newTableLocation())
+            .execute();
 
     checkMetadataFileNum(4, 2, 2, result);
     checkDataFileNum(2, result);
 
     // pick up a version with the data file in the old data directory as the end version
     String targetTableLocation = newTableLocation();
-    CopyTable.Result result1 = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
-        .endVersion(fileName(metadataFilePath))
-        .execute();
+    CopyTable.Result result1 =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
+            .endVersion(fileName(metadataFilePath))
+            .execute();
 
     checkMetadataFileNum(2, 1, 1, result1);
     checkDataFileNum(1, result1);
     List<String> filesToMove1 =
-        spark.read().format("text").load(result1.dataFileListLocation()).as(Encoders.STRING()).collectAsList();
-    Assert.assertTrue("The data file should be in the old data directory.",
+        spark
+            .read()
+            .format("text")
+            .load(result1.dataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
+    Assert.assertTrue(
+        "The data file should be in the old data directory.",
         filesToMove1.stream().findFirst().get().startsWith(sourceTableLocation + "data"));
 
     // pick up a version with the data file in the new data directory as the last copied version
-    CopyTable.Result result2 = actions().copyTable(sourceTable)
-        .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
-        .lastCopiedVersion(fileName(metadataFilePath))
-        .execute();
+    CopyTable.Result result2 =
+        actions()
+            .copyTable(sourceTable)
+            .rewriteLocationPrefix(sourceTableLocation, targetTableLocation)
+            .lastCopiedVersion(fileName(metadataFilePath))
+            .execute();
 
     checkMetadataFileNum(2, 1, 1, result2);
     checkDataFileNum(1, result2);
     List<String> filesToMove2 =
-        spark.read().format("text").load(result2.dataFileListLocation()).as(Encoders.STRING()).collectAsList();
+        spark
+            .read()
+            .format("text")
+            .load(result2.dataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
     Assert.assertTrue(
         "The data file should be in the new data directory.",
         filesToMove2.stream().findFirst().get().startsWith(sourceTableLocation + newMetadataDir));
 
     // check if table properties have been modified
     List<String> metadataFilesToMove =
-        spark.read().format("text").load(result2.metadataFileListLocation()).as(Encoders.STRING()).collectAsList();
-    metadataFilesToMove.stream().filter(f -> f.endsWith(".metadata.json")).forEach(
-        metadataFile -> {
-          StaticTableOperations ops = new StaticTableOperations(metadataFile, sourceTable.io());
-          Table targetStaticTable = new BaseTable(ops, metadataFile);
-          if (targetStaticTable.properties().containsKey(TableProperties.OBJECT_STORE_PATH)) {
-            Assert.assertTrue("The write.object-storage.path should be modified with the target table location.",
-                targetStaticTable.properties().get(TableProperties.OBJECT_STORE_PATH).startsWith(targetTableLocation));
-          }
-        }
-    );
+        spark
+            .read()
+            .format("text")
+            .load(result2.metadataFileListLocation())
+            .as(Encoders.STRING())
+            .collectAsList();
+    metadataFilesToMove.stream()
+        .filter(f -> f.endsWith(".metadata.json"))
+        .forEach(
+            metadataFile -> {
+              StaticTableOperations ops = new StaticTableOperations(metadataFile, sourceTable.io());
+              Table targetStaticTable = new BaseTable(ops, metadataFile);
+              if (targetStaticTable.properties().containsKey(TableProperties.OBJECT_STORE_PATH)) {
+                Assert.assertTrue(
+                    "The write.object-storage.path should be modified with the target table location.",
+                    targetStaticTable
+                        .properties()
+                        .get(TableProperties.OBJECT_STORE_PATH)
+                        .startsWith(targetTableLocation));
+              }
+            });
   }
 
   private Table createMetastoreTable(
-      String location, Map<String, String> properties, String tableName,
-      int snapshotNumber) {
+      String location, Map<String, String> properties, String tableName, int snapshotNumber) {
     spark.conf().set("spark.sql.catalog.hive", SparkCatalog.class.getName());
     spark.conf().set("spark.sql.catalog.hive.type", "hive");
     spark.conf().set("spark.sql.catalog.hive.default-namespace", "default");
@@ -758,14 +884,18 @@ public class TestCopyTableAction extends SparkTestBase {
 
     StringBuilder propertiesStr = new StringBuilder();
     properties.forEach((k, v) -> propertiesStr.append("'" + k + "'='" + v + "',"));
-    String tblProperties = propertiesStr.substring(0, propertiesStr.length() > 0 ? propertiesStr.length() - 1 : 0);
+    String tblProperties =
+        propertiesStr.substring(0, propertiesStr.length() > 0 ? propertiesStr.length() - 1 : 0);
 
     if (tblProperties.isEmpty()) {
-      sql("CREATE TABLE hive.default.%s (c1 bigint, c2 string, c3 string) USING iceberg LOCATION '%s'",
+      sql(
+          "CREATE TABLE hive.default.%s (c1 bigint, c2 string, c3 string) USING iceberg LOCATION '%s'",
           tableName, location);
     } else {
-      sql("CREATE TABLE hive.default.%s (c1 bigint, c2 string, c3 string) USING iceberg LOCATION '%s' TBLPROPERTIES " +
-          "(%s)", tableName, location, tblProperties);
+      sql(
+          "CREATE TABLE hive.default.%s (c1 bigint, c2 string, c3 string) USING iceberg LOCATION '%s' TBLPROPERTIES "
+              + "(%s)",
+          tableName, location, tblProperties);
     }
 
     for (int i = 0; i < snapshotNumber; i++) {
