@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.spark.actions;
 
 import java.io.File;
@@ -38,6 +37,7 @@ import org.apache.iceberg.ManifestLists;
 import org.apache.iceberg.ManifestReader;
 import org.apache.iceberg.ManifestWriter;
 import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.SerializableTable;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.StaticTableOperations;
 import org.apache.iceberg.StructLike;
@@ -56,7 +56,6 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.spark.JobGroupInfo;
-import org.apache.iceberg.spark.SparkUtil;
 import org.apache.spark.api.java.function.MapPartitionsFunction;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.Dataset;
@@ -69,8 +68,7 @@ import org.apache.spark.sql.functions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BaseCopyTableSparkAction
-    extends BaseSparkAction<CopyTable, CopyTable.Result> implements CopyTable {
+public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> implements CopyTable {
 
   private static final Logger LOG = LoggerFactory.getLogger(BaseCopyTableSparkAction.class);
   private static final String DATA_FILE_LIST_DIR = "data-file-list-to-move";
@@ -79,7 +77,8 @@ public class BaseCopyTableSparkAction
   private final Table table;
   private final Set<String> metadataFilesToMove = Collections.synchronizedSet(Sets.newHashSet());
   private final Set<String> manifestFilePaths = Collections.synchronizedSet(Sets.newHashSet());
-  private final Set<ManifestFile> manifestFilesToRewrite = Collections.synchronizedSet(Sets.newHashSet());
+  private final Set<ManifestFile> manifestFilesToRewrite =
+      Collections.synchronizedSet(Sets.newHashSet());
   private String dataFileListPath = null;
   private String metadataFileListPath = null;
   private final boolean enabledPME;
@@ -102,7 +101,8 @@ public class BaseCopyTableSparkAction
 
   @Override
   public CopyTable rewriteLocationPrefix(String sPrefix, String tPrefix) {
-    Preconditions.checkArgument(sPrefix != null && !sPrefix.isEmpty(), "Source prefix('%s') cannot be empty.", sPrefix);
+    Preconditions.checkArgument(
+        sPrefix != null && !sPrefix.isEmpty(), "Source prefix('%s') cannot be empty.", sPrefix);
     this.sourcePrefix = sPrefix;
 
     if (tPrefix != null) {
@@ -113,24 +113,30 @@ public class BaseCopyTableSparkAction
 
   @Override
   public CopyTable lastCopiedVersion(String sVersion) {
-    Preconditions.checkArgument(sVersion != null && !sVersion.trim().isEmpty(),
-        "Last copied version('%s') cannot be empty.", sVersion);
+    Preconditions.checkArgument(
+        sVersion != null && !sVersion.trim().isEmpty(),
+        "Last copied version('%s') cannot be empty.",
+        sVersion);
     this.startVersion = sVersion;
     return this;
   }
 
   @Override
   public CopyTable endVersion(String eVersion) {
-    Preconditions.checkArgument(eVersion != null && !eVersion.trim().isEmpty(),
-        "End version('%s') cannot be empty.", eVersion);
+    Preconditions.checkArgument(
+        eVersion != null && !eVersion.trim().isEmpty(),
+        "End version('%s') cannot be empty.",
+        eVersion);
     this.endVersion = eVersion;
     return this;
   }
 
   @Override
   public CopyTable stagingLocation(String stagingLocation) {
-    Preconditions.checkArgument(stagingLocation != null && !stagingLocation.isEmpty(),
-        "Staging location('%s') cannot be empty.", stagingLocation);
+    Preconditions.checkArgument(
+        stagingLocation != null && !stagingLocation.isEmpty(),
+        "Staging location('%s') cannot be empty.",
+        stagingLocation);
     this.stagingDir = stagingLocation;
     return this;
   }
@@ -155,19 +161,23 @@ public class BaseCopyTableSparkAction
 
   private CopyTable.Result doExecute() {
     rebuildMetaData();
-    return new BaseCopyTableActionResult(dataFileListPath, metadataFileListPath, fileName(endVersion));
+    return new BaseCopyTableActionResult(
+        dataFileListPath, metadataFileListPath, fileName(endVersion));
   }
 
   private void validateInputs() {
-    Preconditions.checkArgument(sourcePrefix != null && !sourcePrefix.isEmpty(),
-        "Source prefix('%s') cannot be empty.", sourcePrefix);
+    Preconditions.checkArgument(
+        sourcePrefix != null && !sourcePrefix.isEmpty(),
+        "Source prefix('%s') cannot be empty.",
+        sourcePrefix);
 
     validateAndSetEndVersion();
 
     endStaticTable = newStaticTable(endVersion, table.io());
 
     TableMetadata tableMetadata = ((HasTableOperations) endStaticTable).operations().current();
-    Preconditions.checkArgument(tableMetadata.formatVersion() == 1, "Support Iceberg format version 1 only.");
+    Preconditions.checkArgument(
+        tableMetadata.formatVersion() == 2, "Support Iceberg format version 2 only.");
 
     validateAndSetStartVersion(tableMetadata);
 
@@ -197,8 +207,10 @@ public class BaseCopyTableSparkAction
         }
       }
 
-      Preconditions.checkArgument(fileExist(endVersion), "Cannot find the end version('%s') in the current version " +
-          "files", endVersion);
+      Preconditions.checkArgument(
+          fileExist(endVersion),
+          "Cannot find the end version('%s') in the current version " + "files",
+          endVersion);
     }
   }
 
@@ -217,8 +229,9 @@ public class BaseCopyTableSparkAction
         }
 
         if (fileNotExist(startVersion)) {
-          throw new IllegalArgumentException("Cannot find the current version of target table in the source table. " +
-              "Please make sure the target table is a subset of source table.");
+          throw new IllegalArgumentException(
+              "Cannot find the current version of target table in the source table. "
+                  + "Please make sure the target table is a subset of source table.");
         }
       }
     } else {
@@ -229,11 +242,14 @@ public class BaseCopyTableSparkAction
         }
       }
 
-      Preconditions.checkArgument(fileExist(startVersion), "Start version('%s') is NOT valid.", startVersion);
+      Preconditions.checkArgument(
+          fileExist(startVersion), "Start version('%s') is NOT valid.", startVersion);
 
-      if (targetTable != null && !fileName(startVersion).equals(fileName(currentMetadataPath(targetTable)))) {
-        throw new IllegalArgumentException("The start version isn't the current version of the target table. " +
-            "Please make sure the target table is a subset of source table.");
+      if (targetTable != null
+          && !fileName(startVersion).equals(fileName(currentMetadataPath(targetTable)))) {
+        throw new IllegalArgumentException(
+            "The start version isn't the current version of the target table. "
+                + "Please make sure the target table is a subset of source table.");
       }
     }
   }
@@ -244,17 +260,21 @@ public class BaseCopyTableSparkAction
 
   private String jobDesc() {
     if (startVersion.isEmpty()) {
-      return String.format("Replacing path prefixes '%s' with '%s' in the metadata files of table %s," +
-          "up to version '%s'.", sourcePrefix, targetPrefix, table.name(), endVersion);
+      return String.format(
+          "Replacing path prefixes '%s' with '%s' in the metadata files of table %s,"
+              + "up to version '%s'.",
+          sourcePrefix, targetPrefix, table.name(), endVersion);
     } else {
-      return String.format("Replacing path prefixes '%s' with '%s' in the metadata files of table %s," +
-          "from version '%s' to '%s'.", sourcePrefix, targetPrefix, table.name(), startVersion, endVersion);
+      return String.format(
+          "Replacing path prefixes '%s' with '%s' in the metadata files of table %s,"
+              + "from version '%s' to '%s'.",
+          sourcePrefix, targetPrefix, table.name(), startVersion, endVersion);
     }
   }
 
   /**
-   * Here are steps: 1. rebuild version files 2. rebuild manifest list files 3. rebuild manifest files 4. get all data
-   * files need to move
+   * Here are steps: 1. rebuild version files 2. rebuild manifest list files 3. rebuild manifest
+   * files 4. get all data files need to move
    */
   private void rebuildMetaData() {
     TableMetadata tableMetadata = ((HasTableOperations) endStaticTable).operations().current();
@@ -269,7 +289,8 @@ public class BaseCopyTableSparkAction
     manifestFilePaths.addAll(manifestFilePathToMove);
 
     // rebuild manifest-list files
-    Set<Snapshot> validSnapshots = Sets.difference(snapshotSet(endVersion), snapshotSet(startVersion));
+    Set<Snapshot> validSnapshots =
+        Sets.difference(snapshotSet(endVersion), snapshotSet(startVersion));
     validSnapshots.forEach(snapshot -> rewriteManifestList(snapshot, tableMetadata));
 
     // rebuild manifest files
@@ -286,25 +307,39 @@ public class BaseCopyTableSparkAction
     fileList.addAll(metadataFilesToMove);
     Dataset<String> metadataFileList = spark().createDataset(fileList, Encoders.STRING());
     metadataFileListPath = stagingDir + METADATA_FILE_LIST_DIR;
-    metadataFileList.repartition(1).write().mode(SaveMode.Overwrite).format("text").save(metadataFileListPath);
+    metadataFileList
+        .repartition(1)
+        .write()
+        .mode(SaveMode.Overwrite)
+        .format("text")
+        .save(metadataFileListPath);
   }
 
   private void saveDataFileList(Dataset<Row> dataFiles) {
     dataFileListPath = stagingDir + DATA_FILE_LIST_DIR;
 
     try {
-      dataFiles.repartition(1).write().mode(SaveMode.Overwrite).format("text").save(dataFileListPath);
+      dataFiles
+          .repartition(1)
+          .write()
+          .mode(SaveMode.Overwrite)
+          .format("text")
+          .save(dataFileListPath);
     } catch (Exception e) {
-      throw new UnsupportedOperationException("Failed to build the data files dataframe, the end version you are " +
-          "trying to copy may contain invalid snapshots, please use the younger version which doesn't have invalid " +
-          "snapshots", e);
+      throw new UnsupportedOperationException(
+          "Failed to build the data files dataframe, the end version you are "
+              + "trying to copy may contain invalid snapshots, please use the younger version which doesn't have invalid "
+              + "snapshots",
+          e);
     }
   }
 
   private Set<Long> getDiffSnapshotIds(Set<Long> allSnapshotIds) {
     Set<Long> snapshotIdsInStartVersion = Sets.newHashSet();
     if (startStaticTable != null) {
-      startStaticTable.snapshots().forEach(snapshot -> snapshotIdsInStartVersion.add(snapshot.snapshotId()));
+      startStaticTable
+          .snapshots()
+          .forEach(snapshot -> snapshotIdsInStartVersion.add(snapshot.snapshotId()));
     }
     return Sets.difference(allSnapshotIds, snapshotIdsInStartVersion);
   }
@@ -327,7 +362,8 @@ public class BaseCopyTableSparkAction
           fileExist(versionFilePath),
           String.format("Version file %s doesn't exist", versionFilePath));
       String newPath = stagingPath(versionFilePath, stagingDir);
-      TableMetadata tableMetadata = new StaticTableOperations(versionFilePath, table.io()).current();
+      TableMetadata tableMetadata =
+          new StaticTableOperations(versionFilePath, table.io()).current();
 
       tableMetadata.snapshots().forEach(snapshot -> allSnapshotIds.add(snapshot.snapshotId()));
 
@@ -348,7 +384,8 @@ public class BaseCopyTableSparkAction
   }
 
   private void rewriteVersionFile(TableMetadata metadata, String stagingPath) {
-    TableMetadata newTableMetadata = TableMetadataUtil.replacePaths(metadata, sourcePrefix, targetPrefix, table.io());
+    TableMetadata newTableMetadata =
+        TableMetadataUtil.replacePaths(metadata, sourcePrefix, targetPrefix);
     TableMetadataParser.overwrite(newTableMetadata, table.io().newOutputFile(stagingPath));
     addToRebuiltFiles(stagingPath);
   }
@@ -358,8 +395,13 @@ public class BaseCopyTableSparkAction
     String path = snapshot.manifestListLocation();
     String stagingPath = stagingPath(path, stagingDir);
     OutputFile outputFile = table.io().newOutputFile(stagingPath);
-    try (FileAppender<ManifestFile> writer = ManifestLists.write(tableMetadata.formatVersion(), outputFile,
-        snapshot.snapshotId(), snapshot.parentId(), snapshot.sequenceNumber())) {
+    try (FileAppender<ManifestFile> writer =
+        ManifestLists.write(
+            tableMetadata.formatVersion(),
+            outputFile,
+            snapshot.snapshotId(),
+            snapshot.parentId(),
+            snapshot.sequenceNumber())) {
 
       for (ManifestFile file : manifestFiles) {
         // need to get the ManifestFile object for manifest file rewriting
@@ -395,25 +437,24 @@ public class BaseCopyTableSparkAction
     try {
       Dataset<Row> lastVersionFiles = buildManifestFileDF(endStaticTable);
       if (startStaticTable == null) {
-        return lastVersionFiles.distinct()
-            .as(Encoders.STRING())
-            .collectAsList();
+        return lastVersionFiles.distinct().as(Encoders.STRING()).collectAsList();
       } else {
-        return lastVersionFiles.distinct()
+        return lastVersionFiles
+            .distinct()
             .filter(functions.column("added_snapshot_id").isInCollection(diffSnapshotIds))
             .as(Encoders.STRING())
             .collectAsList();
       }
     } catch (Exception e) {
-      throw new UnsupportedOperationException("Failed to build the manifest files dataframe, the end version you are " +
-          "trying to copy may contain invalid snapshots, please use the younger version which doesn't have invalid " +
-          "snapshots", e);
+      throw new UnsupportedOperationException(
+          "Failed to build the manifest files dataframe, the end version you are "
+              + "trying to copy may contain invalid snapshots, please use the younger version which doesn't have invalid "
+              + "snapshots",
+          e);
     }
   }
 
-  /**
-   * Rewrite manifest files in a distributed manner.
-   */
+  /** Rewrite manifest files in a distributed manner. */
   private List<ManifestFile> rewriteManifests(TableMetadata tableMetadata) {
     if (manifestFilesToRewrite.isEmpty()) {
       return Lists.newArrayList();
@@ -423,26 +464,38 @@ public class BaseCopyTableSparkAction
     Dataset<ManifestFile> manifestDS =
         spark().createDataset(Lists.newArrayList(manifestFilesToRewrite), manifestFileEncoder);
 
-    Broadcast<FileIO> io = sparkContext().broadcast(SparkUtil.serializableFileIO(table));
-    Broadcast<Map<Integer, PartitionSpec>> specsById = sparkContext().broadcast(tableMetadata.specsById());
+    Broadcast<FileIO> io = sparkContext().broadcast(SerializableTable.copyOf(table).io());
+    Broadcast<Map<Integer, PartitionSpec>> specsById =
+        sparkContext().broadcast(tableMetadata.specsById());
 
     return manifestDS
         .repartition(manifestFilesToRewrite.size())
         .mapPartitions(
-            toManifests(io, stagingDir, tableMetadata.formatVersion(), specsById, sourcePrefix, targetPrefix),
-            manifestFileEncoder
-        )
+            toManifests(
+                io,
+                stagingDir,
+                tableMetadata.formatVersion(),
+                specsById,
+                sourcePrefix,
+                targetPrefix),
+            manifestFileEncoder)
         .collectAsList();
   }
 
   private static MapPartitionsFunction<ManifestFile, ManifestFile> toManifests(
-      Broadcast<FileIO> io, String stagingLocation, int format, Broadcast<Map<Integer, PartitionSpec>> specsById,
-      String sourcePrefix, String targetPrefix) {
+      Broadcast<FileIO> io,
+      String stagingLocation,
+      int format,
+      Broadcast<Map<Integer, PartitionSpec>> specsById,
+      String sourcePrefix,
+      String targetPrefix) {
 
     return rows -> {
       List<ManifestFile> manifests = Lists.newArrayList();
       while (rows.hasNext()) {
-        manifests.add(writeManifest(rows.next(), io, stagingLocation, format, specsById, sourcePrefix, targetPrefix));
+        manifests.add(
+            writeManifest(
+                rows.next(), io, stagingLocation, format, specsById, sourcePrefix, targetPrefix));
       }
 
       return manifests.iterator();
@@ -450,17 +503,27 @@ public class BaseCopyTableSparkAction
   }
 
   private static ManifestFile writeManifest(
-      ManifestFile manifestFile, Broadcast<FileIO> io, String stagingLocation, int format,
-      Broadcast<Map<Integer, PartitionSpec>> specsById, String sourcePrefix, String targetPrefix) throws IOException {
+      ManifestFile manifestFile,
+      Broadcast<FileIO> io,
+      String stagingLocation,
+      int format,
+      Broadcast<Map<Integer, PartitionSpec>> specsById,
+      String sourcePrefix,
+      String targetPrefix)
+      throws IOException {
 
     String stagingPath = stagingPath(manifestFile.path(), stagingLocation);
     OutputFile outputFile = io.value().newOutputFile(stagingPath);
     PartitionSpec spec = specsById.getValue().get(manifestFile.partitionSpecId());
-    ManifestWriter<DataFile> writer = ManifestFiles.write(format, spec, outputFile, manifestFile.snapshotId());
+    ManifestWriter<DataFile> writer =
+        ManifestFiles.write(format, spec, outputFile, manifestFile.snapshotId());
 
-    try (ManifestReader<DataFile> reader = ManifestFiles.read(manifestFile, io.getValue(), specsById.getValue())
-        .select(Arrays.asList("*"))) {
-      reader.entries().forEach(entry -> appendEntry(entry, writer, spec, sourcePrefix, targetPrefix));
+    try (ManifestReader<DataFile> reader =
+        ManifestFiles.read(manifestFile, io.getValue(), specsById.getValue())
+            .select(Arrays.asList("*"))) {
+      reader
+          .entries()
+          .forEach(entry -> appendEntry(entry, writer, spec, sourcePrefix, targetPrefix));
     } finally {
       writer.close();
     }
@@ -469,8 +532,11 @@ public class BaseCopyTableSparkAction
   }
 
   private static void appendEntry(
-      ManifestEntry<DataFile> entry, ManifestWriter<DataFile> writer, PartitionSpec spec,
-      String sourcePrefix, String targetPrefix) {
+      ManifestEntry<DataFile> entry,
+      ManifestWriter<DataFile> writer,
+      PartitionSpec spec,
+      String sourcePrefix,
+      String targetPrefix) {
     DataFile dataFile = entry.file();
     String dataFilePath = dataFile.path().toString();
     if (dataFilePath.startsWith(sourcePrefix)) {
@@ -483,10 +549,11 @@ public class BaseCopyTableSparkAction
         writer.add(dataFile);
         break;
       case EXISTING:
-        writer.existing(dataFile, entry.snapshotId(), entry.sequenceNumber());
+        writer.existing(
+            dataFile, entry.snapshotId(), entry.dataSequenceNumber(), entry.fileSequenceNumber());
         break;
       case DELETED:
-        writer.delete(dataFile);
+        writer.delete(dataFile, entry.dataSequenceNumber(), entry.fileSequenceNumber());
         break;
     }
   }
@@ -496,7 +563,8 @@ public class BaseCopyTableSparkAction
     if (startStaticTable == null) {
       return lastVersionFiles.distinct().select("file_path");
     } else {
-      return lastVersionFiles.distinct()
+      return lastVersionFiles
+          .distinct()
           .filter(functions.column("snapshot_id").isInCollection(diffSnapshotIds))
           .select("file_path");
     }
@@ -539,14 +607,16 @@ public class BaseCopyTableSparkAction
   }
 
   private String getMetadataLocation(Table tbl) {
-    String currentMetadataPath = ((HasTableOperations) tbl).operations().current().metadataFileLocation();
+    String currentMetadataPath =
+        ((HasTableOperations) tbl).operations().current().metadataFileLocation();
     int lastIndex = currentMetadataPath.lastIndexOf(File.separator);
     String metadataDir = "";
     if (lastIndex != -1) {
       metadataDir = currentMetadataPath.substring(0, lastIndex + 1);
     }
 
-    Preconditions.checkArgument(!metadataDir.isEmpty(), "Failed to get the metadata file root directory");
+    Preconditions.checkArgument(
+        !metadataDir.isEmpty(), "Failed to get the metadata file root directory");
     return metadataDir;
   }
 }
