@@ -2,6 +2,7 @@
 .DS_Store
 .cache
 tmp/
+site
 
 # intellij files
 .idea
@@ -9,14 +10,15 @@ tmp/
 *.ipr
 *.iws
 *.iml
+out
 
 # gradle build
 .gradle
+.out/
 build
 dependencies.lock
 **/dependencies.lock
 gradle/
-out
 gradle/wrapper/gradle-wrapper.jar
 
 # rat library install location
@@ -24,6 +26,15 @@ lib/
 
 # web site build
 site/site
+
+# benchmark output
+spark/v3.1/spark/benchmark/*
+spark/v3.2/spark/benchmark/*
+spark/v3.3/spark/benchmark/*
+spark/v3.3/spark-extensions/benchmark/*
+spark/v3.4/spark/benchmark/*
+spark/v3.4/spark-extensions/benchmark/*
+data/benchmark/*
 
 __pycache__/
 *.py[cod]
@@ -55,3 +66,10 @@ derby.log
 
 # Python stuff
 python/.mypy_cache/
+python/htmlcov
+python/coverage.xml
+
+python/pyiceberg/avro/decoder_fast.c
+python/pyiceberg/avro/*.html
+python/pyiceberg/avro/*.so
+

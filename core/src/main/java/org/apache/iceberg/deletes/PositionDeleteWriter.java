@@ -16,77 +16,114 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.deletes;
 
-import java.io.Closeable;
+import static org.apache.iceberg.MetadataColumns.DELETE_FILE_PATH;
+import static org.apache.iceberg.MetadataColumns.DELETE_FILE_POS;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Set;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.FileMetadata;
+import org.apache.iceberg.Metrics;
+import org.apache.iceberg.MetricsUtil;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.encryption.EncryptionKeyMetadata;
+import org.apache.iceberg.io.DeleteWriteResult;
 import org.apache.iceberg.io.FileAppender;
+import org.apache.iceberg.io.FileWriter;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.util.CharSequenceSet;
 
-public class PositionDeleteWriter<T> implements Closeable {
+/**
+ * A position delete writer that can handle deletes ordered by file and position.
+ *
+ * <p>This writer does not keep track of seen deletes and assumes all incoming records are ordered
+ * by file and position as required by the spec. If there is no external process to order the
+ * records, consider using {@link SortingPositionOnlyDeleteWriter} instead.
+ */
+public class PositionDeleteWriter<T> implements FileWriter<PositionDelete<T>, DeleteWriteResult> {
+  private static final Set<Integer> SINGLE_REFERENCED_FILE_BOUNDS_ONLY =
+      ImmutableSet.of(DELETE_FILE_PATH.fieldId(), DELETE_FILE_POS.fieldId());
+
   private final FileAppender<StructLike> appender;
   private final FileFormat format;
   private final String location;
   private final PartitionSpec spec;
   private final StructLike partition;
   private final ByteBuffer keyMetadata;
-  private final PositionDelete<T> delete;
-  private final Set<CharSequence> pathSet;
+  private final CharSequenceSet referencedDataFiles;
   private DeleteFile deleteFile = null;
 
-  public PositionDeleteWriter(FileAppender<StructLike> appender, FileFormat format, String location,
-                              PartitionSpec spec, StructLike partition, EncryptionKeyMetadata keyMetadata) {
+  public PositionDeleteWriter(
+      FileAppender<StructLike> appender,
+      FileFormat format,
+      String location,
+      PartitionSpec spec,
+      StructLike partition,
+      EncryptionKeyMetadata keyMetadata) {
     this.appender = appender;
     this.format = format;
     this.location = location;
     this.spec = spec;
     this.partition = partition;
     this.keyMetadata = keyMetadata != null ? keyMetadata.buffer() : null;
-    this.delete = PositionDelete.create();
-    this.pathSet = CharSequenceSet.empty();
+    this.referencedDataFiles = CharSequenceSet.empty();
   }
 
-  public void delete(CharSequence path, long pos) {
-    delete(path, pos, null);
+  @Override
+  public void write(PositionDelete<T> positionDelete) {
+    referencedDataFiles.add(positionDelete.path());
+    appender.add(positionDelete);
   }
 
-  public void delete(CharSequence path, long pos, T row) {
-    pathSet.add(path);
-    appender.add(delete.set(path, pos, row));
+  @Override
+  public long length() {
+    return appender.length();
   }
 
   @Override
   public void close() throws IOException {
     if (deleteFile == null) {
       appender.close();
-      this.deleteFile = FileMetadata.deleteFileBuilder(spec)
-          .ofPositionDeletes()
-          .withFormat(format)
-          .withPath(location)
-          .withPartition(partition)
-          .withEncryptionKeyMetadata(keyMetadata)
-          .withFileSizeInBytes(appender.length())
-          .withMetrics(appender.metrics())
-          .build();
+      this.deleteFile =
+          FileMetadata.deleteFileBuilder(spec)
+              .ofPositionDeletes()
+              .withFormat(format)
+              .withPath(location)
+              .withPartition(partition)
+              .withEncryptionKeyMetadata(keyMetadata)
+              .withSplitOffsets(appender.splitOffsets())
+              .withFileSizeInBytes(appender.length())
+              .withMetrics(metrics())
+              .build();
     }
   }
 
-  public Set<CharSequence> referencedDataFiles() {
-    return pathSet;
+  public CharSequenceSet referencedDataFiles() {
+    return referencedDataFiles;
   }
 
   public DeleteFile toDeleteFile() {
     Preconditions.checkState(deleteFile != null, "Cannot create delete file from unclosed writer");
     return deleteFile;
+  }
+
+  @Override
+  public DeleteWriteResult result() {
+    return new DeleteWriteResult(toDeleteFile(), referencedDataFiles());
+  }
+
+  private Metrics metrics() {
+    Metrics metrics = appender.metrics();
+    if (referencedDataFiles.size() > 1) {
+      return MetricsUtil.copyWithoutFieldBounds(metrics, SINGLE_REFERENCED_FILE_BOUNDS_ONLY);
+    } else {
+      return metrics;
+    }
   }
 }

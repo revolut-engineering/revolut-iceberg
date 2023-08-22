@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.util;
 
 import java.util.AbstractMap;
@@ -24,6 +23,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
@@ -57,7 +57,7 @@ public class StructLikeMap<T> extends AbstractMap<StructLike, T> implements Map<
 
   @Override
   public boolean containsKey(Object key) {
-    if (key instanceof StructLike) {
+    if (key instanceof StructLike || key == null) {
       StructLikeWrapper wrapper = wrappers.get();
       boolean result = wrapperMap.containsKey(wrapper.set((StructLike) key));
       wrapper.set(null); // don't hold a reference to the key.
@@ -73,7 +73,7 @@ public class StructLikeMap<T> extends AbstractMap<StructLike, T> implements Map<
 
   @Override
   public T get(Object key) {
-    if (key instanceof StructLike) {
+    if (key instanceof StructLike || key == null) {
       StructLikeWrapper wrapper = wrappers.get();
       T value = wrapperMap.get(wrapper.set((StructLike) key));
       wrapper.set(null); // don't hold a reference to the key.
@@ -84,12 +84,12 @@ public class StructLikeMap<T> extends AbstractMap<StructLike, T> implements Map<
 
   @Override
   public T put(StructLike key, T value) {
-    return wrapperMap.put(StructLikeWrapper.forType(type).set(key), value);
+    return wrapperMap.put(wrappers.get().copyFor(key), value);
   }
 
   @Override
   public T remove(Object key) {
-    if (key instanceof StructLike) {
+    if (key instanceof StructLike || key == null) {
       StructLikeWrapper wrapper = wrappers.get();
       T value = wrapperMap.remove(wrapper.set((StructLike) key));
       wrapper.set(null); // don't hold a reference to the key.
@@ -162,8 +162,8 @@ public class StructLikeMap<T> extends AbstractMap<StructLike, T> implements Map<
         return false;
       } else {
         StructLikeEntry that = (StructLikeEntry<R>) o;
-        return Objects.equals(getKey(), that.getKey()) &&
-            Objects.equals(getValue(), that.getValue());
+        return Objects.equals(getKey(), that.getKey())
+            && Objects.equals(getValue(), that.getValue());
       }
     }
 
@@ -171,5 +171,11 @@ public class StructLikeMap<T> extends AbstractMap<StructLike, T> implements Map<
     public R setValue(R value) {
       throw new UnsupportedOperationException("Does not support setValue.");
     }
+  }
+
+  public <U> StructLikeMap<U> transformValues(Function<T, U> func) {
+    StructLikeMap<U> result = create(type);
+    wrapperMap.forEach((key, value) -> result.put(key.get(), func.apply(value)));
+    return result;
   }
 }

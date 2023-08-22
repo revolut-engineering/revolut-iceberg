@@ -16,22 +16,19 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.mr;
 
 import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SchemaParser;
-import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.util.SerializationUtil;
 
 public class InputFormatConfig {
 
-  private InputFormatConfig() {
-  }
+  private InputFormatConfig() {}
 
   // configuration values for Iceberg input formats
   public static final String REUSE_CONTAINERS = "iceberg.mr.reuse.containers";
@@ -47,21 +44,24 @@ public class InputFormatConfig {
   public static final String TABLE_LOCATION = "iceberg.mr.table.location";
   public static final String TABLE_SCHEMA = "iceberg.mr.table.schema";
   public static final String PARTITION_SPEC = "iceberg.mr.table.partition.spec";
-  public static final String SERIALIZED_TABLE = "iceberg.mr.serialized.table";
+  public static final String SERIALIZED_TABLE_PREFIX = "iceberg.mr.serialized.table.";
+  public static final String TABLE_CATALOG_PREFIX = "iceberg.mr.table.catalog.";
   public static final String LOCALITY = "iceberg.mr.locality";
-  public static final String CATALOG = "iceberg.mr.catalog";
-  public static final String HADOOP_CATALOG_WAREHOUSE_LOCATION = "iceberg.mr.catalog.hadoop.warehouse.location";
-  public static final String CATALOG_LOADER_CLASS = "iceberg.mr.catalog.loader.class";
+
   public static final String SELECTED_COLUMNS = "iceberg.mr.selected.columns";
   public static final String EXTERNAL_TABLE_PURGE = "external.table.purge";
-  public static final String FILE_IO = "iceberg.mr.file.io";
-  public static final String LOCATION_PROVIDER = "iceberg.mr.location.provider";
-  public static final String ENCRYPTION_MANAGER = "iceberg.mr.encription.manager";
 
-  public static final String COMMIT_THREAD_POOL_SIZE = "iceberg.mr.commit.thread.pool.size";
-  public static final int COMMIT_THREAD_POOL_SIZE_DEFAULT = 10;
+  public static final String CONFIG_SERIALIZATION_DISABLED =
+      "iceberg.mr.config.serialization.disabled";
+  public static final boolean CONFIG_SERIALIZATION_DISABLED_DEFAULT = false;
+  public static final String OUTPUT_TABLES = "iceberg.mr.output.tables";
+  public static final String COMMIT_TABLE_THREAD_POOL_SIZE =
+      "iceberg.mr.commit.table.thread.pool.size";
+  public static final int COMMIT_TABLE_THREAD_POOL_SIZE_DEFAULT = 10;
+  public static final String COMMIT_FILE_THREAD_POOL_SIZE =
+      "iceberg.mr.commit.file.thread.pool.size";
+  public static final int COMMIT_FILE_THREAD_POOL_SIZE_DEFAULT = 10;
   public static final String WRITE_TARGET_FILE_SIZE = "iceberg.mr.write.target.file.size";
-  public static final String WRITE_FILE_FORMAT = "iceberg.mr.write.file.format";
 
   public static final String CASE_SENSITIVE = "iceberg.mr.case.sensitive";
   public static final boolean CASE_SENSITIVE_DEFAULT = true;
@@ -73,6 +73,8 @@ public class InputFormatConfig {
   public static final String ICEBERG_SNAPSHOTS_TABLE_SUFFIX = ".snapshots";
   public static final String SNAPSHOT_TABLE = "iceberg.snapshots.table";
   public static final String SNAPSHOT_TABLE_SUFFIX = "__snapshots";
+
+  public static final String CATALOG_CONFIG_PREFIX = "iceberg.catalog.";
 
   public enum InMemoryDataModel {
     PIG,
@@ -93,14 +95,6 @@ public class InputFormatConfig {
     }
 
     public Configuration conf() {
-      // Store the io and the current snapshot of the table in the configuration which are needed for the split
-      // generation
-      Table table = Catalogs.loadTable(conf);
-
-      // The FileIO serializes the configuration and we might end up recursively serializing the objects.
-      // To avoid this unset the value before serialization and set it again in the next line.
-      conf.unset(InputFormatConfig.FILE_IO);
-      conf.set(InputFormatConfig.FILE_IO, SerializationUtil.serializeToBase64(table.io()));
       return conf;
     }
 
@@ -164,16 +158,9 @@ public class InputFormatConfig {
       return this;
     }
 
-    /**
-     * If this API is called. The input splits constructed will have host location information
-     */
+    /** If this API is called. The input splits constructed will have host location information */
     public ConfigBuilder preferLocality() {
       conf.setBoolean(LOCALITY, true);
-      return this;
-    }
-
-    public ConfigBuilder catalogLoader(Class<? extends CatalogLoader> catalogLoader) {
-      conf.setClass(CATALOG_LOADER_CLASS, catalogLoader, CatalogLoader.class);
       return this;
     }
 
@@ -188,10 +175,11 @@ public class InputFormatConfig {
     }
 
     /**
-     * Compute platforms pass down filters to data sources. If the data source cannot apply some filters, or only
-     * partially applies the filter, it will return the residual filter back. If the platform can correctly apply the
-     * residual filters, then it should call this api. Otherwise the current api will throw an exception if the passed
-     * in filter is not completely satisfied.
+     * Compute platforms pass down filters to data sources. If the data source cannot apply some
+     * filters, or only partially applies the filter, it will return the residual filter back. If
+     * the platform can correctly apply the residual filters, then it should call this api.
+     * Otherwise the current api will throw an exception if the passed in filter is not completely
+     * satisfied.
      */
     public ConfigBuilder skipResidualFiltering() {
       conf.setBoolean(InputFormatConfig.SKIP_RESIDUAL_FILTERING, true);
@@ -212,9 +200,20 @@ public class InputFormatConfig {
     return readColumns != null && readColumns.length > 0 ? readColumns : null;
   }
 
+  /**
+   * Get Hadoop config key of a catalog property based on catalog name
+   *
+   * @param catalogName catalog name
+   * @param catalogProperty catalog property, can be any custom property, a commonly used list of
+   *     properties can be found at {@link org.apache.iceberg.CatalogProperties}
+   * @return Hadoop config key of a catalog property for the catalog name
+   */
+  public static String catalogPropertyConfigKey(String catalogName, String catalogProperty) {
+    return String.format("%s%s.%s", CATALOG_CONFIG_PREFIX, catalogName, catalogProperty);
+  }
+
   private static Schema schema(Configuration conf, String key) {
     String json = conf.get(key);
     return json == null ? null : SchemaParser.fromJson(json);
   }
-
 }

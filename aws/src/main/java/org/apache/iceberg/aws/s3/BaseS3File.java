@@ -16,10 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.aws.s3;
 
-import org.apache.iceberg.aws.AwsProperties;
+import org.apache.iceberg.metrics.MetricsContext;
 import software.amazon.awssdk.http.HttpStatusCode;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -29,17 +28,16 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 abstract class BaseS3File {
   private final S3Client client;
   private final S3URI uri;
-  private final AwsProperties awsProperties;
+  private final S3FileIOProperties s3FileIOProperties;
   private HeadObjectResponse metadata;
+  private final MetricsContext metrics;
 
-  BaseS3File(S3Client client, S3URI uri) {
-    this(client, uri, new AwsProperties());
-  }
-
-  BaseS3File(S3Client client, S3URI uri, AwsProperties awsProperties) {
+  BaseS3File(
+      S3Client client, S3URI uri, S3FileIOProperties s3FileIOProperties, MetricsContext metrics) {
     this.client = client;
     this.uri = uri;
-    this.awsProperties = awsProperties;
+    this.s3FileIOProperties = s3FileIOProperties;
+    this.metrics = metrics;
   }
 
   public String location() {
@@ -54,8 +52,12 @@ abstract class BaseS3File {
     return uri;
   }
 
-  public AwsProperties awsProperties() {
-    return awsProperties;
+  public S3FileIOProperties s3FileIOProperties() {
+    return s3FileIOProperties;
+  }
+
+  protected MetricsContext metrics() {
+    return metrics;
   }
 
   /**
@@ -77,10 +79,9 @@ abstract class BaseS3File {
 
   protected HeadObjectResponse getObjectMetadata() throws S3Exception {
     if (metadata == null) {
-      HeadObjectRequest.Builder requestBuilder = HeadObjectRequest.builder()
-          .bucket(uri().bucket())
-          .key(uri().key());
-      S3RequestUtil.configureEncryption(awsProperties, requestBuilder);
+      HeadObjectRequest.Builder requestBuilder =
+          HeadObjectRequest.builder().bucket(uri().bucket()).key(uri().key());
+      S3RequestUtil.configureEncryption(s3FileIOProperties, requestBuilder);
       metadata = client().headObject(requestBuilder.build());
     }
 
@@ -91,5 +92,4 @@ abstract class BaseS3File {
   public String toString() {
     return uri.toString();
   }
-
 }

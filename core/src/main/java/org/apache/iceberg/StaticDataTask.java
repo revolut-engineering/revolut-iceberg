@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.io.Serializable;
@@ -30,23 +29,38 @@ import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.util.StructProjection;
 
 class StaticDataTask implements DataTask {
 
-  static <T> DataTask of(InputFile metadata, Iterable<T> values, Function<T, Row> transform) {
-    return new StaticDataTask(metadata,
+  static <T> DataTask of(
+      InputFile metadata,
+      Schema tableSchema,
+      Schema projectedSchema,
+      Iterable<T> values,
+      Function<T, Row> transform) {
+    return new StaticDataTask(
+        metadata,
+        tableSchema,
+        projectedSchema,
         Lists.newArrayList(Iterables.transform(values, transform::apply)).toArray(new Row[0]));
   }
 
   private final DataFile metadataFile;
   private final StructLike[] rows;
+  private final Schema tableSchema;
+  private final Schema projectedSchema;
 
-  private StaticDataTask(InputFile metadata, StructLike[] rows) {
-    this.metadataFile = DataFiles.builder(PartitionSpec.unpartitioned())
-        .withInputFile(metadata)
-        .withRecordCount(rows.length)
-        .withFormat(FileFormat.METADATA)
-        .build();
+  private StaticDataTask(
+      InputFile metadata, Schema tableSchema, Schema projectedSchema, StructLike[] rows) {
+    this.tableSchema = tableSchema;
+    this.projectedSchema = projectedSchema;
+    this.metadataFile =
+        DataFiles.builder(PartitionSpec.unpartitioned())
+            .withInputFile(metadata)
+            .withRecordCount(rows.length)
+            .withFormat(FileFormat.METADATA)
+            .build();
     this.rows = rows;
   }
 
@@ -57,7 +71,9 @@ class StaticDataTask implements DataTask {
 
   @Override
   public CloseableIterable<StructLike> rows() {
-    return CloseableIterable.withNoopClose(Arrays.asList(rows));
+    StructProjection projection = StructProjection.create(tableSchema, projectedSchema);
+    Iterable<StructLike> projectedRows = Iterables.transform(Arrays.asList(rows), projection::wrap);
+    return CloseableIterable.withNoopClose(projectedRows);
   }
 
   @Override
@@ -90,9 +106,7 @@ class StaticDataTask implements DataTask {
     return ImmutableList.of(this);
   }
 
-  /**
-   * Implements {@link StructLike#get} for passing static rows.
-   */
+  /** Implements {@link StructLike#get} for passing static rows. */
   static class Row implements StructLike, Serializable {
     public static Row of(Object... values) {
       return new Row(values);

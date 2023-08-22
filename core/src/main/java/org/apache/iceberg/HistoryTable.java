@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.util.Map;
@@ -30,54 +29,34 @@ import org.apache.iceberg.util.SnapshotUtil;
 
 /**
  * A {@link Table} implementation that exposes a table's history as rows.
- * <p>
- * History is based on the table's snapshot log, which logs each update to the table's current snapshot.
+ *
+ * <p>History is based on the table's snapshot log, which logs each update to the table's current
+ * snapshot.
  */
 public class HistoryTable extends BaseMetadataTable {
-  private static final Schema HISTORY_SCHEMA = new Schema(
-      Types.NestedField.required(1, "made_current_at", Types.TimestampType.withZone()),
-      Types.NestedField.required(2, "snapshot_id", Types.LongType.get()),
-      Types.NestedField.optional(3, "parent_id", Types.LongType.get()),
-      Types.NestedField.required(4, "is_current_ancestor", Types.BooleanType.get())
-  );
+  private static final Schema HISTORY_SCHEMA =
+      new Schema(
+          Types.NestedField.required(1, "made_current_at", Types.TimestampType.withZone()),
+          Types.NestedField.required(2, "snapshot_id", Types.LongType.get()),
+          Types.NestedField.optional(3, "parent_id", Types.LongType.get()),
+          Types.NestedField.required(4, "is_current_ancestor", Types.BooleanType.get()));
 
-  private final TableOperations ops;
-  private final Table table;
-  private final String name;
-
-  HistoryTable(TableOperations ops, Table table) {
-    this(ops, table, table.name() + ".history");
+  HistoryTable(Table table) {
+    this(table, table.name() + ".history");
   }
 
-  HistoryTable(TableOperations ops, Table table, String name) {
-    this.ops = ops;
-    this.table = table;
-    this.name = name;
-  }
-
-  @Override
-  Table table() {
-    return table;
-  }
-
-  @Override
-  public String name() {
-    return name;
+  HistoryTable(Table table, String name) {
+    super(table, name);
   }
 
   @Override
   public TableScan newScan() {
-    return new HistoryScan();
+    return new HistoryScan(table());
   }
 
   @Override
   public Schema schema() {
     return HISTORY_SCHEMA;
-  }
-
-  @Override
-  String metadataLocation() {
-    return ops.current().metadataFileLocation();
   }
 
   @Override
@@ -87,19 +66,31 @@ public class HistoryTable extends BaseMetadataTable {
 
   private DataTask task(TableScan scan) {
     return StaticDataTask.of(
-        ops.io().newInputFile(ops.current().metadataFileLocation()),
-        ops.current().snapshotLog(),
-        convertHistoryEntryFunc(table));
+        table().io().newInputFile(table().operations().current().metadataFileLocation()),
+        schema(),
+        scan.schema(),
+        table().history(),
+        convertHistoryEntryFunc(table()));
   }
 
   private class HistoryScan extends StaticTableScan {
-    HistoryScan() {
-      super(ops, table, HISTORY_SCHEMA, HistoryTable.this::task);
+    HistoryScan(Table table) {
+      super(table, HISTORY_SCHEMA, MetadataTableType.HISTORY, HistoryTable.this::task);
+    }
+
+    HistoryScan(Table table, TableScanContext context) {
+      super(table, HISTORY_SCHEMA, MetadataTableType.HISTORY, HistoryTable.this::task, context);
+    }
+
+    @Override
+    protected TableScan newRefinedScan(Table table, Schema schema, TableScanContext context) {
+      return new HistoryScan(table, context);
     }
 
     @Override
     public CloseableIterable<FileScanTask> planFiles() {
-      // override planFiles to avoid the check for a current snapshot because this metadata table is for all snapshots
+      // override planFiles to avoid the check for a current snapshot because this metadata table is
+      // for all snapshots
       return CloseableIterable.withNoopClose(HistoryTable.this.task(this));
     }
   }
@@ -110,7 +101,7 @@ public class HistoryTable extends BaseMetadataTable {
       snapshots.put(snap.snapshotId(), snap);
     }
 
-    Set<Long> ancestorIds = Sets.newHashSet(SnapshotUtil.currentAncestors(table));
+    Set<Long> ancestorIds = Sets.newHashSet(SnapshotUtil.currentAncestorIds(table));
 
     return historyEntry -> {
       long snapshotId = historyEntry.snapshotId();
@@ -119,8 +110,7 @@ public class HistoryTable extends BaseMetadataTable {
           historyEntry.timestampMillis() * 1000,
           historyEntry.snapshotId(),
           snap != null ? snap.parentId() : null,
-          ancestorIds.contains(snapshotId)
-      );
+          ancestorIds.contains(snapshotId));
     };
   }
 }

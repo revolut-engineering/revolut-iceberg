@@ -16,39 +16,50 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.avro;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.types.Types;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class TestHasIds {
   @Test
   public void test() {
-    Schema schema = new Schema(
-        Types.NestedField.required(0, "id", Types.LongType.get()),
-        Types.NestedField.optional(5, "location", Types.MapType.ofOptional(6, 7,
-            Types.StringType.get(),
-            Types.StructType.of(
-                Types.NestedField.required(1, "lat", Types.FloatType.get()),
-                Types.NestedField.optional(2, "long", Types.FloatType.get())
-            ))));
+    Schema schema =
+        new Schema(
+            Types.NestedField.required(0, "id", Types.LongType.get()),
+            Types.NestedField.optional(
+                5,
+                "location",
+                Types.MapType.ofOptional(
+                    6,
+                    7,
+                    Types.StringType.get(),
+                    Types.StructType.of(
+                        Types.NestedField.required(1, "lat", Types.FloatType.get()),
+                        Types.NestedField.optional(2, "long", Types.FloatType.get())))));
 
     org.apache.avro.Schema avroSchema = RemoveIds.removeIds(schema);
-    Assert.assertFalse(AvroSchemaUtil.hasIds(avroSchema));
-
+    assertThat(AvroSchemaUtil.hasIds(avroSchema)).as("Avro schema should not have IDs").isFalse();
     avroSchema.getFields().get(0).addProp("field-id", 1);
-    Assert.assertTrue(AvroSchemaUtil.hasIds(avroSchema));
+    assertThat(AvroSchemaUtil.hasIds(avroSchema)).as("Avro schema should have IDs").isTrue();
 
     // Create a fresh copy
     avroSchema = RemoveIds.removeIds(schema);
     avroSchema
-        .getFields().get(1).schema()
-        .getTypes().get(1).getValueType()
-        .getTypes().get(1).getFields().get(1)
+        .getFields()
+        .get(1)
+        .schema()
+        .getTypes()
+        .get(1)
+        .getValueType()
+        .getTypes()
+        .get(1)
+        .getFields()
+        .get(1)
         .addProp("field-id", 1);
-    Assert.assertTrue(AvroSchemaUtil.hasIds(avroSchema));
+    assertThat(AvroSchemaUtil.hasIds(avroSchema)).as("Avro schema should have IDs").isTrue();
   }
 }

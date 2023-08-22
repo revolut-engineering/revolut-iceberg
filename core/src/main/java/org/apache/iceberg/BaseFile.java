@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.io.Serializable;
@@ -32,24 +31,27 @@ import org.apache.avro.specific.SpecificData;
 import org.apache.iceberg.avro.AvroSchemaUtil;
 import org.apache.iceberg.relocated.com.google.common.base.MoreObjects;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
-import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.ArrayUtil;
 import org.apache.iceberg.util.ByteBuffers;
+import org.apache.iceberg.util.SerializableMap;
 
-/**
- * Base class for both {@link DataFile} and {@link DeleteFile}.
- */
+/** Base class for both {@link DataFile} and {@link DeleteFile}. */
 abstract class BaseFile<F>
-    implements ContentFile<F>, IndexedRecord, StructLike, SpecificData.SchemaConstructable, Serializable {
+    implements ContentFile<F>,
+        IndexedRecord,
+        StructLike,
+        SpecificData.SchemaConstructable,
+        Serializable {
   static final Types.StructType EMPTY_STRUCT_TYPE = Types.StructType.of();
-  static final PartitionData EMPTY_PARTITION_DATA = new PartitionData(EMPTY_STRUCT_TYPE) {
-    @Override
-    public PartitionData copy() {
-      return this; // this does not change
-    }
-  };
+  static final PartitionData EMPTY_PARTITION_DATA =
+      new PartitionData(EMPTY_STRUCT_TYPE) {
+        @Override
+        public PartitionData copy() {
+          return this; // this does not change
+        }
+      };
 
   private int[] fromProjectionPos;
   private Types.StructType partitionType;
@@ -62,6 +64,8 @@ abstract class BaseFile<F>
   private PartitionData partitionData = null;
   private Long recordCount = null;
   private long fileSizeInBytes = -1L;
+  private Long dataSequenceNumber = null;
+  private Long fileSequenceNumber = null;
 
   // optional fields
   private Map<Integer, Long> columnSizes = null;
@@ -78,9 +82,10 @@ abstract class BaseFile<F>
   // cached schema
   private transient Schema avroSchema = null;
 
-  /**
-   * Used by Avro reflection to instantiate this class when reading manifest files.
-   */
+  // lazy variables
+  private transient volatile List<Long> splitOffsetList = null;
+
+  /** Used by Avro reflection to instantiate this class when reading manifest files. */
   BaseFile(Schema avroSchema) {
     this.avroSchema = avroSchema;
 
@@ -117,12 +122,24 @@ abstract class BaseFile<F>
     this.partitionData = new PartitionData(partitionType);
   }
 
-  BaseFile(int specId, FileContent content, String filePath, FileFormat format,
-           PartitionData partition, long fileSizeInBytes, long recordCount,
-           Map<Integer, Long> columnSizes, Map<Integer, Long> valueCounts,
-           Map<Integer, Long> nullValueCounts, Map<Integer, Long> nanValueCounts,
-           Map<Integer, ByteBuffer> lowerBounds, Map<Integer, ByteBuffer> upperBounds, List<Long> splitOffsets,
-           int[] equalityFieldIds, Integer sortOrderId, ByteBuffer keyMetadata) {
+  BaseFile(
+      int specId,
+      FileContent content,
+      String filePath,
+      FileFormat format,
+      PartitionData partition,
+      long fileSizeInBytes,
+      long recordCount,
+      Map<Integer, Long> columnSizes,
+      Map<Integer, Long> valueCounts,
+      Map<Integer, Long> nullValueCounts,
+      Map<Integer, Long> nanValueCounts,
+      Map<Integer, ByteBuffer> lowerBounds,
+      Map<Integer, ByteBuffer> upperBounds,
+      List<Long> splitOffsets,
+      int[] equalityFieldIds,
+      Integer sortOrderId,
+      ByteBuffer keyMetadata) {
     this.partitionSpecId = specId;
     this.content = content;
     this.filePath = filePath;
@@ -169,13 +186,12 @@ abstract class BaseFile<F>
     this.recordCount = toCopy.recordCount;
     this.fileSizeInBytes = toCopy.fileSizeInBytes;
     if (fullCopy) {
-      // TODO: support lazy conversion to/from map
-      this.columnSizes = copy(toCopy.columnSizes);
-      this.valueCounts = copy(toCopy.valueCounts);
-      this.nullValueCounts = copy(toCopy.nullValueCounts);
-      this.nanValueCounts = copy(toCopy.nanValueCounts);
-      this.lowerBounds = SerializableByteBufferMap.wrap(copy(toCopy.lowerBounds));
-      this.upperBounds = SerializableByteBufferMap.wrap(copy(toCopy.upperBounds));
+      this.columnSizes = SerializableMap.copyOf(toCopy.columnSizes);
+      this.valueCounts = SerializableMap.copyOf(toCopy.valueCounts);
+      this.nullValueCounts = SerializableMap.copyOf(toCopy.nullValueCounts);
+      this.nanValueCounts = SerializableMap.copyOf(toCopy.nanValueCounts);
+      this.lowerBounds = SerializableByteBufferMap.wrap(SerializableMap.copyOf(toCopy.lowerBounds));
+      this.upperBounds = SerializableByteBufferMap.wrap(SerializableMap.copyOf(toCopy.upperBounds));
     } else {
       this.columnSizes = null;
       this.valueCounts = null;
@@ -185,18 +201,25 @@ abstract class BaseFile<F>
       this.upperBounds = null;
     }
     this.fromProjectionPos = toCopy.fromProjectionPos;
-    this.keyMetadata = toCopy.keyMetadata == null ? null : Arrays.copyOf(toCopy.keyMetadata, toCopy.keyMetadata.length);
-    this.splitOffsets = toCopy.splitOffsets == null ? null :
-        Arrays.copyOf(toCopy.splitOffsets, toCopy.splitOffsets.length);
-    this.equalityIds = toCopy.equalityIds != null ? Arrays.copyOf(toCopy.equalityIds, toCopy.equalityIds.length) : null;
+    this.keyMetadata =
+        toCopy.keyMetadata == null
+            ? null
+            : Arrays.copyOf(toCopy.keyMetadata, toCopy.keyMetadata.length);
+    this.splitOffsets =
+        toCopy.splitOffsets == null
+            ? null
+            : Arrays.copyOf(toCopy.splitOffsets, toCopy.splitOffsets.length);
+    this.equalityIds =
+        toCopy.equalityIds != null
+            ? Arrays.copyOf(toCopy.equalityIds, toCopy.equalityIds.length)
+            : null;
     this.sortOrderId = toCopy.sortOrderId;
+    this.dataSequenceNumber = toCopy.dataSequenceNumber;
+    this.fileSequenceNumber = toCopy.fileSequenceNumber;
   }
 
-  /**
-   * Constructor for Java serialization.
-   */
-  BaseFile() {
-  }
+  /** Constructor for Java serialization. */
+  BaseFile() {}
 
   @Override
   public int specId() {
@@ -205,6 +228,24 @@ abstract class BaseFile<F>
 
   void setSpecId(int specId) {
     this.partitionSpecId = specId;
+  }
+
+  @Override
+  public Long dataSequenceNumber() {
+    return dataSequenceNumber;
+  }
+
+  public void setDataSequenceNumber(Long dataSequenceNumber) {
+    this.dataSequenceNumber = dataSequenceNumber;
+  }
+
+  @Override
+  public Long fileSequenceNumber() {
+    return fileSequenceNumber;
+  }
+
+  public void setFileSequenceNumber(Long fileSequenceNumber) {
+    this.fileSequenceNumber = fileSequenceNumber;
   }
 
   protected abstract Schema getAvroSchema(Types.StructType partitionStruct);
@@ -234,48 +275,51 @@ abstract class BaseFile<F>
         this.filePath = value.toString();
         return;
       case 2:
-        this.format = FileFormat.valueOf(value.toString());
+        this.format = FileFormat.fromString(value.toString());
         return;
       case 3:
-        this.partitionData = (PartitionData) value;
+        this.partitionSpecId = (value != null) ? (Integer) value : -1;
         return;
       case 4:
-        this.recordCount = (Long) value;
+        this.partitionData = (PartitionData) value;
         return;
       case 5:
-        this.fileSizeInBytes = (Long) value;
+        this.recordCount = (Long) value;
         return;
       case 6:
-        this.columnSizes = (Map<Integer, Long>) value;
+        this.fileSizeInBytes = (Long) value;
         return;
       case 7:
-        this.valueCounts = (Map<Integer, Long>) value;
+        this.columnSizes = (Map<Integer, Long>) value;
         return;
       case 8:
-        this.nullValueCounts = (Map<Integer, Long>) value;
+        this.valueCounts = (Map<Integer, Long>) value;
         return;
       case 9:
-        this.nanValueCounts = (Map<Integer, Long>) value;
+        this.nullValueCounts = (Map<Integer, Long>) value;
         return;
       case 10:
-        this.lowerBounds = SerializableByteBufferMap.wrap((Map<Integer, ByteBuffer>) value);
+        this.nanValueCounts = (Map<Integer, Long>) value;
         return;
       case 11:
-        this.upperBounds = SerializableByteBufferMap.wrap((Map<Integer, ByteBuffer>) value);
+        this.lowerBounds = SerializableByteBufferMap.wrap((Map<Integer, ByteBuffer>) value);
         return;
       case 12:
-        this.keyMetadata = ByteBuffers.toByteArray((ByteBuffer) value);
+        this.upperBounds = SerializableByteBufferMap.wrap((Map<Integer, ByteBuffer>) value);
         return;
       case 13:
-        this.splitOffsets = ArrayUtil.toLongArray((List<Long>) value);
+        this.keyMetadata = ByteBuffers.toByteArray((ByteBuffer) value);
         return;
       case 14:
-        this.equalityIds = ArrayUtil.toIntArray((List<Integer>) value);
+        this.splitOffsets = ArrayUtil.toLongArray((List<Long>) value);
         return;
       case 15:
-        this.sortOrderId = (Integer) value;
+        this.equalityIds = ArrayUtil.toIntArray((List<Integer>) value);
         return;
       case 16:
+        this.sortOrderId = (Integer) value;
+        return;
+      case 17:
         this.fileOrdinal = (long) value;
         return;
       default:
@@ -303,33 +347,35 @@ abstract class BaseFile<F>
       case 2:
         return format != null ? format.toString() : null;
       case 3:
-        return partitionData;
+        return partitionSpecId;
       case 4:
-        return recordCount;
+        return partitionData;
       case 5:
-        return fileSizeInBytes;
+        return recordCount;
       case 6:
-        return columnSizes;
+        return fileSizeInBytes;
       case 7:
-        return valueCounts;
+        return columnSizes;
       case 8:
-        return nullValueCounts;
+        return valueCounts;
       case 9:
-        return nanValueCounts;
+        return nullValueCounts;
       case 10:
-        return lowerBounds;
+        return nanValueCounts;
       case 11:
-        return upperBounds;
+        return lowerBounds;
       case 12:
-        return keyMetadata();
+        return upperBounds;
       case 13:
-        return splitOffsets();
+        return keyMetadata();
       case 14:
-        return equalityFieldIds();
+        return splitOffsets();
       case 15:
-        return sortOrderId;
+        return equalityFieldIds();
       case 16:
-        return pos;
+        return sortOrderId;
+      case 17:
+        return fileOrdinal;
       default:
         throw new UnsupportedOperationException("Unknown field ordinal: " + pos);
     }
@@ -382,32 +428,32 @@ abstract class BaseFile<F>
 
   @Override
   public Map<Integer, Long> columnSizes() {
-    return columnSizes;
+    return toReadableMap(columnSizes);
   }
 
   @Override
   public Map<Integer, Long> valueCounts() {
-    return valueCounts;
+    return toReadableMap(valueCounts);
   }
 
   @Override
   public Map<Integer, Long> nullValueCounts() {
-    return nullValueCounts;
+    return toReadableMap(nullValueCounts);
   }
 
   @Override
   public Map<Integer, Long> nanValueCounts() {
-    return nanValueCounts;
+    return toReadableMap(nanValueCounts);
   }
 
   @Override
   public Map<Integer, ByteBuffer> lowerBounds() {
-    return lowerBounds;
+    return toReadableByteBufferMap(lowerBounds);
   }
 
   @Override
   public Map<Integer, ByteBuffer> upperBounds() {
-    return upperBounds;
+    return toReadableByteBufferMap(upperBounds);
   }
 
   @Override
@@ -417,7 +463,15 @@ abstract class BaseFile<F>
 
   @Override
   public List<Long> splitOffsets() {
-    return ArrayUtil.toLongList(splitOffsets);
+    if (splitOffsetList == null && splitOffsets != null) {
+      this.splitOffsetList = ArrayUtil.toUnmodifiableLongList(splitOffsets);
+    }
+
+    return splitOffsetList;
+  }
+
+  long[] splitOffsetArray() {
+    return splitOffsets;
   }
 
   @Override
@@ -430,13 +484,24 @@ abstract class BaseFile<F>
     return sortOrderId;
   }
 
-  private static <K, V> Map<K, V> copy(Map<K, V> map) {
-    if (map != null) {
-      Map<K, V> copy = Maps.newHashMapWithExpectedSize(map.size());
-      copy.putAll(map);
-      return Collections.unmodifiableMap(copy);
+  private static <K, V> Map<K, V> toReadableMap(Map<K, V> map) {
+    if (map == null) {
+      return null;
+    } else if (map instanceof SerializableMap) {
+      return ((SerializableMap<K, V>) map).immutableMap();
+    } else {
+      return Collections.unmodifiableMap(map);
     }
-    return null;
+  }
+
+  private static Map<Integer, ByteBuffer> toReadableByteBufferMap(Map<Integer, ByteBuffer> map) {
+    if (map == null) {
+      return null;
+    } else if (map instanceof SerializableByteBufferMap) {
+      return ((SerializableByteBufferMap) map).immutableMap();
+    } else {
+      return Collections.unmodifiableMap(map);
+    }
   }
 
   @Override
@@ -445,6 +510,7 @@ abstract class BaseFile<F>
         .add("content", content.toString().toLowerCase(Locale.ROOT))
         .add("file_path", filePath)
         .add("file_format", format)
+        .add("spec_id", specId())
         .add("partition", partitionData)
         .add("record_count", recordCount)
         .add("file_size_in_bytes", fileSizeInBytes)
@@ -458,7 +524,8 @@ abstract class BaseFile<F>
         .add("split_offsets", splitOffsets == null ? "null" : splitOffsets())
         .add("equality_ids", equalityIds == null ? "null" : equalityFieldIds())
         .add("sort_order_id", sortOrderId)
+        .add("data_sequence_number", dataSequenceNumber == null ? "null" : dataSequenceNumber)
+        .add("file_sequence_number", fileSequenceNumber == null ? "null" : fileSequenceNumber)
         .toString();
   }
-
 }

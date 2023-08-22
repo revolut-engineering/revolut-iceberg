@@ -16,44 +16,42 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.util;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
-import org.apache.iceberg.SystemProperties;
+import org.apache.iceberg.SystemConfigs;
 import org.apache.iceberg.relocated.com.google.common.util.concurrent.MoreExecutors;
 import org.apache.iceberg.relocated.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 public class ThreadPools {
 
-  private ThreadPools() {
-  }
+  private ThreadPools() {}
 
+  /**
+   * @deprecated Use {@link SystemConfigs#WORKER_THREAD_POOL_SIZE WORKER_THREAD_POOL_SIZE} instead;
+   *     will be removed in 2.0.0
+   */
+  @Deprecated
   public static final String WORKER_THREAD_POOL_SIZE_PROP =
-      SystemProperties.WORKER_THREAD_POOL_SIZE_PROP;
+      SystemConfigs.WORKER_THREAD_POOL_SIZE.propertyKey();
 
-  public static final int WORKER_THREAD_POOL_SIZE = getPoolSize(
-      WORKER_THREAD_POOL_SIZE_PROP,
-      Runtime.getRuntime().availableProcessors());
+  public static final int WORKER_THREAD_POOL_SIZE = SystemConfigs.WORKER_THREAD_POOL_SIZE.value();
 
-  private static final ExecutorService WORKER_POOL = MoreExecutors.getExitingExecutorService(
-      (ThreadPoolExecutor) Executors.newFixedThreadPool(
-          WORKER_THREAD_POOL_SIZE,
-          new ThreadFactoryBuilder()
-              .setDaemon(true)
-              .setNameFormat("iceberg-worker-pool-%d")
-              .build()));
+  private static final ExecutorService WORKER_POOL = newWorkerPool("iceberg-worker-pool");
 
   /**
    * Return an {@link ExecutorService} that uses the "worker" thread-pool.
-   * <p>
-   * The size of the worker pool limits the number of tasks concurrently reading manifests in the
+   *
+   * <p>The size of the worker pool limits the number of tasks concurrently reading manifests in the
    * base table implementation across all concurrent planning operations.
-   * <p>
-   * The size of this thread-pool is controlled by the Java system property
-   * {@code iceberg.worker.num-threads}.
+   *
+   * <p>The size of this thread-pool is controlled by the Java system property {@code
+   * iceberg.worker.num-threads}.
    *
    * @return an {@link ExecutorService} that uses the worker pool
    */
@@ -61,15 +59,30 @@ public class ThreadPools {
     return WORKER_POOL;
   }
 
-  private static int getPoolSize(String systemProperty, int defaultSize) {
-    String value = System.getProperty(systemProperty);
-    if (value != null) {
-      try {
-        return Integer.parseUnsignedInt(value);
-      } catch (NumberFormatException e) {
-        // will return the default
-      }
-    }
-    return defaultSize;
+  public static ExecutorService newWorkerPool(String namePrefix) {
+    return newWorkerPool(namePrefix, WORKER_THREAD_POOL_SIZE);
+  }
+
+  public static ExecutorService newWorkerPool(String namePrefix, int poolSize) {
+    return MoreExecutors.getExitingExecutorService(
+        (ThreadPoolExecutor)
+            Executors.newFixedThreadPool(poolSize, newDaemonThreadFactory(namePrefix)));
+  }
+
+  /**
+   * Create a new {@link ScheduledExecutorService} with the given name and pool size.
+   *
+   * <p>Threads used by this service will be daemon threads.
+   *
+   * @param namePrefix a base name for threads in the executor service's thread pool
+   * @param poolSize max number of threads to use
+   * @return an executor service
+   */
+  public static ScheduledExecutorService newScheduledPool(String namePrefix, int poolSize) {
+    return new ScheduledThreadPoolExecutor(poolSize, newDaemonThreadFactory(namePrefix));
+  }
+
+  private static ThreadFactory newDaemonThreadFactory(String namePrefix) {
+    return new ThreadFactoryBuilder().setDaemon(true).setNameFormat(namePrefix + "-%d").build();
   }
 }

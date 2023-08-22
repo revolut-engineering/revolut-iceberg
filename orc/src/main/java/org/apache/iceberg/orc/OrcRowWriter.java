@@ -16,32 +16,30 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.orc;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.stream.Stream;
 import org.apache.iceberg.FieldMetrics;
 import org.apache.orc.storage.ql.exec.vector.VectorizedRowBatch;
 
-/**
- * Write data value of a schema.
- */
+/** Write data value of a schema. */
 public interface OrcRowWriter<T> {
 
   /**
    * Writes or appends a row to ORC's VectorizedRowBatch.
    *
-   * @param row    the row data value to write.
+   * @param row the row data value to write.
    * @param output the VectorizedRowBatch to which the output will be written.
    * @throws IOException if there's any IO error while writing the data value.
    */
   void write(T row, VectorizedRowBatch output) throws IOException;
 
-  /**
-   * Returns a stream of {@link FieldMetrics} that this OrcRowWriter keeps track of.
-   */
-  default Stream<FieldMetrics> metrics() {
+  List<OrcValueWriter<?>> writers();
+
+  /** Returns a stream of {@link FieldMetrics} that this OrcRowWriter keeps track of. */
+  default Stream<FieldMetrics<?>> metrics() {
     return Stream.empty();
   }
 }

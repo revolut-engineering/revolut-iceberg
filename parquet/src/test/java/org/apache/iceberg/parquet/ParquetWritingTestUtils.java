@@ -16,12 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.parquet;
+
+import static org.apache.iceberg.Files.localOutput;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
@@ -32,44 +34,47 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.parquet.schema.MessageType;
-import org.junit.rules.TemporaryFolder;
 
-import static org.apache.iceberg.Files.localOutput;
-
-/**
- * Utilities for tests that need to write Parquet files.
- */
+/** Utilities for tests that need to write Parquet files. */
 class ParquetWritingTestUtils {
 
-  private ParquetWritingTestUtils() {
-  }
+  private ParquetWritingTestUtils() {}
 
-  static File writeRecords(TemporaryFolder temp, Schema schema, GenericData.Record... records) throws IOException {
+  static File writeRecords(Path temp, Schema schema, GenericData.Record... records)
+      throws IOException {
     return writeRecords(temp, schema, Collections.emptyMap(), null, records);
   }
 
-  static File writeRecords(TemporaryFolder temp, Schema schema,
-                           Map<String, String> properties, GenericData.Record... records) throws IOException {
+  static File writeRecords(
+      Path temp, Schema schema, Map<String, String> properties, GenericData.Record... records)
+      throws IOException {
     return writeRecords(temp, schema, properties, null, records);
   }
 
   static File writeRecords(
-          TemporaryFolder temp,
-          Schema schema, Map<String, String> properties,
-          Function<MessageType, ParquetValueWriter<?>> createWriterFunc,
-          GenericData.Record... records) throws IOException {
+      Path temp,
+      Schema schema,
+      Map<String, String> properties,
+      Function<MessageType, ParquetValueWriter<?>> createWriterFunc,
+      GenericData.Record... records)
+      throws IOException {
     File file = createTempFile(temp);
     write(file, schema, properties, createWriterFunc, records);
     return file;
   }
 
-  static long write(File file, Schema schema, Map<String, String> properties,
-                    Function<MessageType, ParquetValueWriter<?>> createWriterFunc,
-                    GenericData.Record... records) throws IOException {
+  static long write(
+      File file,
+      Schema schema,
+      Map<String, String> properties,
+      Function<MessageType, ParquetValueWriter<?>> createWriterFunc,
+      GenericData.Record... records)
+      throws IOException {
 
     long len = 0;
 
-    FileAppender<GenericData.Record> writer = Parquet.write(localOutput(file))
+    FileAppender<GenericData.Record> writer =
+        Parquet.write(localOutput(file))
             .schema(schema)
             .setAll(properties)
             .createWriterFunc(createWriterFunc)
@@ -77,7 +82,10 @@ class ParquetWritingTestUtils {
 
     try (Closeable toClose = writer) {
       writer.addAll(Lists.newArrayList(records));
-      len = writer.length(); // in deprecated adapter we need to get the length first and then close the writer
+      len =
+          writer
+              .length(); // in deprecated adapter we need to get the length first and then close the
+      // writer
     }
 
     if (writer instanceof ParquetWriter) {
@@ -86,8 +94,8 @@ class ParquetWritingTestUtils {
     return len;
   }
 
-  static File createTempFile(TemporaryFolder temp) throws IOException {
-    File tmpFolder = temp.newFolder("parquet");
+  static File createTempFile(Path temp) throws IOException {
+    File tmpFolder = temp.resolve("parquet").toFile();
     String filename = UUID.randomUUID().toString();
     return new File(tmpFolder, FileFormat.PARQUET.addExtension(filename));
   }

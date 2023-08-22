@@ -16,11 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.avro;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.apache.avro.Schema;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
@@ -71,21 +71,23 @@ public class RemoveIds extends AvroSchemaVisitor<Schema> {
   }
 
   private static Schema.Field copyField(Schema.Field field, Schema newSchema) {
-    Schema.Field copy = new Schema.Field(field.name(), newSchema, field.doc(), field.defaultVal(), field.order());
+    Schema.Field copy =
+        new Schema.Field(field.name(), newSchema, field.doc(), field.defaultVal(), field.order());
     for (Map.Entry<String, Object> prop : field.getObjectProps().entrySet()) {
       String key = prop.getKey();
-      if (key != AvroSchemaUtil.FIELD_ID_PROP) {
+      if (!Objects.equals(key, AvroSchemaUtil.FIELD_ID_PROP)) {
         copy.addProp(key, prop.getValue());
       }
     }
     return copy;
   }
 
-  static org.apache.avro.Schema removeIds(org.apache.iceberg.Schema schema) {
-    return AvroSchemaVisitor.visit(AvroSchemaUtil.convert(schema.asStruct(), "table"), new RemoveIds());
+  static Schema removeIds(org.apache.iceberg.Schema schema) {
+    return AvroSchemaVisitor.visit(
+        AvroSchemaUtil.convert(schema.asStruct(), "table"), new RemoveIds());
   }
 
-  public static org.apache.avro.Schema removeIds(org.apache.avro.Schema schema) {
+  public static Schema removeIds(Schema schema) {
     return AvroSchemaVisitor.visit(schema, new RemoveIds());
   }
 }

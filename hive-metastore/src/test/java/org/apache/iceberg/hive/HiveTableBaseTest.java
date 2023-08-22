@@ -16,8 +16,12 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.hive;
+
+import static org.apache.iceberg.PartitionSpec.builderFor;
+import static org.apache.iceberg.TableMetadataParser.getFileExtension;
+import static org.apache.iceberg.types.Types.NestedField.optional;
+import static org.apache.iceberg.types.Types.NestedField.required;
 
 import java.io.File;
 import java.nio.file.Paths;
@@ -30,42 +34,41 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.types.Types;
-import org.junit.After;
-import org.junit.Before;
-
-import static org.apache.iceberg.PartitionSpec.builderFor;
-import static org.apache.iceberg.TableMetadataParser.getFileExtension;
-import static org.apache.iceberg.types.Types.NestedField.optional;
-import static org.apache.iceberg.types.Types.NestedField.required;
-
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 
 public class HiveTableBaseTest extends HiveMetastoreTest {
 
-  static final String TABLE_NAME =  "tbl";
+  static final String TABLE_NAME = "tbl";
   static final TableIdentifier TABLE_IDENTIFIER = TableIdentifier.of(DB_NAME, TABLE_NAME);
 
-  static final Schema schema = new Schema(Types.StructType.of(
-      required(1, "id", Types.LongType.get())).fields());
+  static final Schema schema =
+      new Schema(Types.StructType.of(required(1, "id", Types.LongType.get())).fields());
 
-  static final Schema altered = new Schema(Types.StructType.of(
-      required(1, "id", Types.LongType.get()),
-      optional(2, "data", Types.LongType.get())).fields());
+  static final Schema altered =
+      new Schema(
+          Types.StructType.of(
+                  required(1, "id", Types.LongType.get()),
+                  optional(2, "data", Types.LongType.get()))
+              .fields());
 
   private static final PartitionSpec partitionSpec = builderFor(schema).identity("id").build();
 
   private Path tableLocation;
 
-  @Before
+  @BeforeEach
   public void createTestTable() {
-    this.tableLocation = new Path(catalog.createTable(TABLE_IDENTIFIER, schema, partitionSpec).location());
+    this.tableLocation =
+        new Path(catalog.createTable(TABLE_IDENTIFIER, schema, partitionSpec).location());
   }
 
-  @After
+  @AfterEach
   public void dropTestTable() throws Exception {
     // drop the table data
     tableLocation.getFileSystem(hiveConf).delete(tableLocation, true);
     catalog.dropTable(TABLE_IDENTIFIER, false /* metadata only, location was already deleted */);
   }
+
   private static String getTableBasePath(String tableName) {
     String databasePath = metastore.getDatabasePath(DB_NAME);
     return Paths.get(databasePath, tableName).toAbsolutePath().toString();
@@ -79,7 +82,7 @@ public class HiveTableBaseTest extends HiveMetastoreTest {
     return getTableLocationPath(tableName).toString();
   }
 
-  private static String metadataLocation(String tableName) {
+  protected static String metadataLocation(String tableName) {
     return Paths.get(getTableBasePath(tableName), "metadata").toString();
   }
 
@@ -98,10 +101,8 @@ public class HiveTableBaseTest extends HiveMetastoreTest {
   }
 
   private static List<String> filterByExtension(String tableName, String extension) {
-    return metadataFiles(tableName)
-        .stream()
+    return metadataFiles(tableName).stream()
         .filter(f -> f.endsWith(extension))
         .collect(Collectors.toList());
   }
-
 }

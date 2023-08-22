@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.catalog;
 
 import java.util.List;
@@ -27,12 +26,10 @@ import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.NoSuchNamespaceException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
-import org.apache.iceberg.exceptions.NotFoundException;
 
-/**
- * A Catalog API for table create, drop, and load operations.
- */
+/** A Catalog API for table create, drop, and load operations. */
 public interface Catalog {
 
   /**
@@ -49,7 +46,7 @@ public interface Catalog {
    *
    * @param namespace a namespace
    * @return a list of identifiers for tables
-   * @throws  NotFoundException if the namespace is not found
+   * @throws NoSuchNamespaceException if the namespace is not found
    */
   List<TableIdentifier> listTables(Namespace namespace);
 
@@ -64,12 +61,19 @@ public interface Catalog {
    * @return a Table instance
    * @throws AlreadyExistsException if the table already exists
    */
-  Table createTable(
+  default Table createTable(
       TableIdentifier identifier,
       Schema schema,
       PartitionSpec spec,
       String location,
-      Map<String, String> properties);
+      Map<String, String> properties) {
+
+    return buildTable(identifier, schema)
+        .withPartitionSpec(spec)
+        .withLocation(location)
+        .withProperties(properties)
+        .create();
+  }
 
   /**
    * Create a table.
@@ -98,10 +102,7 @@ public interface Catalog {
    * @return a Table instance
    * @throws AlreadyExistsException if the table already exists
    */
-  default Table createTable(
-      TableIdentifier identifier,
-      Schema schema,
-      PartitionSpec spec) {
+  default Table createTable(TableIdentifier identifier, Schema schema, PartitionSpec spec) {
     return createTable(identifier, schema, spec, null, null);
   }
 
@@ -113,9 +114,7 @@ public interface Catalog {
    * @return a Table instance
    * @throws AlreadyExistsException if the table already exists
    */
-  default Table createTable(
-      TableIdentifier identifier,
-      Schema schema) {
+  default Table createTable(TableIdentifier identifier, Schema schema) {
     return createTable(identifier, schema, PartitionSpec.unpartitioned(), null, null);
   }
 
@@ -130,12 +129,19 @@ public interface Catalog {
    * @return a {@link Transaction} to create the table
    * @throws AlreadyExistsException if the table already exists
    */
-  Transaction newCreateTableTransaction(
+  default Transaction newCreateTableTransaction(
       TableIdentifier identifier,
       Schema schema,
       PartitionSpec spec,
       String location,
-      Map<String, String> properties);
+      Map<String, String> properties) {
+
+    return buildTable(identifier, schema)
+        .withPartitionSpec(spec)
+        .withLocation(location)
+        .withProperties(properties)
+        .createTransaction();
+  }
 
   /**
    * Start a transaction to create a table.
@@ -165,9 +171,7 @@ public interface Catalog {
    * @throws AlreadyExistsException if the table already exists
    */
   default Transaction newCreateTableTransaction(
-      TableIdentifier identifier,
-      Schema schema,
-      PartitionSpec spec) {
+      TableIdentifier identifier, Schema schema, PartitionSpec spec) {
     return newCreateTableTransaction(identifier, schema, spec, null, null);
   }
 
@@ -179,9 +183,7 @@ public interface Catalog {
    * @return a {@link Transaction} to create the table
    * @throws AlreadyExistsException if the table already exists
    */
-  default Transaction newCreateTableTransaction(
-      TableIdentifier identifier,
-      Schema schema) {
+  default Transaction newCreateTableTransaction(TableIdentifier identifier, Schema schema) {
     return newCreateTableTransaction(identifier, schema, PartitionSpec.unpartitioned(), null, null);
   }
 
@@ -197,13 +199,26 @@ public interface Catalog {
    * @return a {@link Transaction} to replace the table
    * @throws NoSuchTableException if the table doesn't exist and orCreate is false
    */
-  Transaction newReplaceTableTransaction(
+  default Transaction newReplaceTableTransaction(
       TableIdentifier identifier,
       Schema schema,
       PartitionSpec spec,
       String location,
       Map<String, String> properties,
-      boolean orCreate);
+      boolean orCreate) {
+
+    TableBuilder tableBuilder =
+        buildTable(identifier, schema)
+            .withPartitionSpec(spec)
+            .withLocation(location)
+            .withProperties(properties);
+
+    if (orCreate) {
+      return tableBuilder.createOrReplaceTransaction();
+    } else {
+      return tableBuilder.replaceTransaction();
+    }
+  }
 
   /**
    * Start a transaction to replace a table.
@@ -236,10 +251,7 @@ public interface Catalog {
    * @throws NoSuchTableException if the table doesn't exist and orCreate is false
    */
   default Transaction newReplaceTableTransaction(
-      TableIdentifier identifier,
-      Schema schema,
-      PartitionSpec spec,
-      boolean orCreate) {
+      TableIdentifier identifier, Schema schema, PartitionSpec spec, boolean orCreate) {
     return newReplaceTableTransaction(identifier, schema, spec, null, null, orCreate);
   }
 
@@ -253,10 +265,9 @@ public interface Catalog {
    * @throws NoSuchTableException if the table doesn't exist and orCreate is false
    */
   default Transaction newReplaceTableTransaction(
-      TableIdentifier identifier,
-      Schema schema,
-      boolean orCreate) {
-    return newReplaceTableTransaction(identifier, schema, PartitionSpec.unpartitioned(), null, null, orCreate);
+      TableIdentifier identifier, Schema schema, boolean orCreate) {
+    return newReplaceTableTransaction(
+        identifier, schema, PartitionSpec.unpartitioned(), null, null, orCreate);
   }
 
   /**
@@ -286,8 +297,8 @@ public interface Catalog {
 
   /**
    * Drop a table; optionally delete data and metadata files.
-   * <p>
-   * If purge is set to true the implementation should delete all data and metadata files.
+   *
+   * <p>If purge is set to true the implementation should delete all data and metadata files.
    *
    * @param identifier a table identifier
    * @param purge if true, delete all data and metadata files in the table
@@ -315,33 +326,56 @@ public interface Catalog {
   Table loadTable(TableIdentifier identifier);
 
   /**
-   * Instantiate a builder to either create a table or start a create/replace transaction.
+   * Invalidate cached table metadata from current catalog.
+   *
+   * <p>If the table is already loaded or cached, drop cached data. If the table does not exist or
+   * is not cached, do nothing.
+   *
+   * @param identifier a table identifier
+   */
+  default void invalidateTable(TableIdentifier identifier) {}
+
+  /**
+   * Register a table with the catalog if it does not exist.
+   *
+   * @param identifier a table identifier
+   * @param metadataFileLocation the location of a metadata file
+   * @return a Table instance
+   * @throws AlreadyExistsException if the table already exists in the catalog.
+   */
+  default Table registerTable(TableIdentifier identifier, String metadataFileLocation) {
+    throw new UnsupportedOperationException("Registering tables is not supported");
+  }
+
+  /**
+   * /** Instantiate a builder to either create a table or start a create/replace transaction.
    *
    * @param identifier a table identifier
    * @param schema a schema
    * @return the builder to create a table or start a create/replace transaction
    */
   default TableBuilder buildTable(TableIdentifier identifier, Schema schema) {
-    throw new UnsupportedOperationException(this.getClass().getName() + " does not implement buildTable");
+    throw new UnsupportedOperationException(
+        this.getClass().getName() + " does not implement buildTable");
   }
 
   /**
    * Initialize a catalog given a custom name and a map of catalog properties.
-   * <p>
-   * A custom Catalog implementation must have a no-arg constructor.
-   * A compute engine like Spark or Flink will first initialize the catalog without any arguments,
-   * and then call this method to complete catalog initialization with properties passed into the engine.
+   *
+   * <p>A custom Catalog implementation must have a no-arg constructor. A compute engine like Spark
+   * or Flink will first initialize the catalog without any arguments, and then call this method to
+   * complete catalog initialization with properties passed into the engine.
    *
    * @param name a custom name for the catalog
    * @param properties catalog properties
    */
-  default void initialize(String name, Map<String, String> properties) {
-  }
+  default void initialize(String name, Map<String, String> properties) {}
 
   /**
-   * A builder used to create valid {@link Table tables} or start create/replace {@link Transaction transactions}.
-   * <p>
-   * Call {@link #buildTable(TableIdentifier, Schema)} to create a new builder.
+   * A builder used to create valid {@link Table tables} or start create/replace {@link Transaction
+   * transactions}.
+   *
+   * <p>Call {@link #buildTable(TableIdentifier, Schema)} to create a new builder.
    */
   interface TableBuilder {
     /**
@@ -379,7 +413,7 @@ public interface Catalog {
     /**
      * Adds a key/value property to the table.
      *
-     * @param key   a key
+     * @param key a key
      * @param value a value
      * @return this for method chaining
      */

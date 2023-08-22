@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
+
+import org.mockito.Mockito;
 
 public class MockFileScanTask extends BaseFileScanTask {
 
@@ -28,8 +29,64 @@ public class MockFileScanTask extends BaseFileScanTask {
     this.length = length;
   }
 
+  public MockFileScanTask(DataFile file) {
+    super(file, null, null, null, null);
+    this.length = file.fileSizeInBytes();
+  }
+
+  public MockFileScanTask(DataFile file, DeleteFile[] deleteFiles) {
+    super(file, deleteFiles, null, null, null);
+    this.length = file.fileSizeInBytes();
+  }
+
+  public MockFileScanTask(DataFile file, String schemaString, String specString) {
+    super(file, null, schemaString, specString, null);
+    this.length = file.fileSizeInBytes();
+  }
+
+  public static MockFileScanTask mockTask(long length, int sortOrderId) {
+    DataFile mockFile = Mockito.mock(DataFile.class);
+    Mockito.when(mockFile.fileSizeInBytes()).thenReturn(length);
+    Mockito.when(mockFile.sortOrderId()).thenReturn(sortOrderId);
+    return new MockFileScanTask(mockFile);
+  }
+
+  public static MockFileScanTask mockTaskWithDeletes(long length, int nDeletes) {
+    DeleteFile[] mockDeletes = new DeleteFile[nDeletes];
+    for (int i = 0; i < nDeletes; i++) {
+      mockDeletes[i] = Mockito.mock(DeleteFile.class);
+    }
+
+    DataFile mockFile = Mockito.mock(DataFile.class);
+    Mockito.when(mockFile.fileSizeInBytes()).thenReturn(length);
+    return new MockFileScanTask(mockFile, mockDeletes);
+  }
+
   @Override
   public long length() {
     return length;
+  }
+
+  @Override
+  public String toString() {
+    return "Mock Scan Task Size: " + length;
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+
+    MockFileScanTask that = (MockFileScanTask) o;
+    return length == that.length;
+  }
+
+  @Override
+  public int hashCode() {
+    return (int) (length ^ (length >>> 32));
   }
 }

@@ -16,18 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.transforms;
-
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.Schema;
-import org.apache.iceberg.TestHelpers;
-import org.apache.iceberg.expressions.Expression;
-import org.apache.iceberg.expressions.ResidualEvaluator;
-import org.apache.iceberg.expressions.UnboundPredicate;
-import org.apache.iceberg.types.Types;
-import org.junit.Assert;
-import org.junit.Test;
 
 import static org.apache.iceberg.TestHelpers.assertAndUnwrapUnbound;
 import static org.apache.iceberg.expressions.Expressions.equal;
@@ -36,13 +25,24 @@ import static org.apache.iceberg.expressions.Expressions.greaterThanOrEqual;
 import static org.apache.iceberg.expressions.Expressions.lessThan;
 import static org.apache.iceberg.expressions.Expressions.lessThanOrEqual;
 import static org.apache.iceberg.expressions.Expressions.notEqual;
+import static org.apache.iceberg.expressions.Expressions.notStartsWith;
 import static org.apache.iceberg.expressions.Expressions.startsWith;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.TestHelpers;
+import org.apache.iceberg.expressions.Expression;
+import org.apache.iceberg.expressions.ResidualEvaluator;
+import org.apache.iceberg.expressions.UnboundPredicate;
+import org.apache.iceberg.types.Types;
+import org.junit.jupiter.api.Test;
 
 public class TestTruncatesResiduals {
 
   /**
-   * Test helper method to compute residual for a given partitionValue against a predicate
-   * and assert the resulting residual expression is same as the expectedOp
+   * Test helper method to compute residual for a given partitionValue against a predicate and
+   * assert the resulting residual expression is same as the expectedOp
    *
    * @param spec the partition spec
    * @param predicate predicate to calculate the residual against
@@ -50,32 +50,35 @@ public class TestTruncatesResiduals {
    * @param expectedOp expected operation to assert against
    * @param <T> Type parameter of partitionValue
    */
-  public <T> void assertResidualValue(PartitionSpec spec, UnboundPredicate<?> predicate,
-                                  T partitionValue, Expression.Operation expectedOp) {
+  public <T> void assertResidualValue(
+      PartitionSpec spec,
+      UnboundPredicate<?> predicate,
+      T partitionValue,
+      Expression.Operation expectedOp) {
     ResidualEvaluator resEval = ResidualEvaluator.of(spec, predicate, true);
     Expression residual = resEval.residualFor(TestHelpers.Row.of(partitionValue));
 
-    Assert.assertEquals(expectedOp, residual.op());
+    assertThat(residual.op()).isEqualTo(expectedOp);
   }
 
   /**
-   * Test helper method to compute residual for a given partitionValue against a predicate
-   * and assert that the resulting expression is same as the original predicate
+   * Test helper method to compute residual for a given partitionValue against a predicate and
+   * assert that the resulting expression is same as the original predicate
    *
    * @param spec the partition spec
    * @param predicate predicate to calculate the residual against
    * @param partitionValue value of the partition to check the residual for
    * @param <T> Type parameter of partitionValue
    */
-  public <T> void assertResidualPredicate(PartitionSpec spec,
-                                      UnboundPredicate<?> predicate, T partitionValue) {
+  public <T> void assertResidualPredicate(
+      PartitionSpec spec, UnboundPredicate<?> predicate, T partitionValue) {
     ResidualEvaluator resEval = ResidualEvaluator.of(spec, predicate, true);
     Expression residual = resEval.residualFor(TestHelpers.Row.of(partitionValue));
 
     UnboundPredicate<?> unbound = assertAndUnwrapUnbound(residual);
-    Assert.assertEquals(predicate.op(), unbound.op());
-    Assert.assertEquals(predicate.ref().name(), unbound.ref().name());
-    Assert.assertEquals(predicate.literal().value(), unbound.literal().value());
+    assertThat(unbound.op()).isEqualTo(predicate.op());
+    assertThat(unbound.ref().name()).isEqualTo(predicate.ref().name());
+    assertThat(unbound.literal().value()).isEqualTo(predicate.literal().value());
   }
 
   @Test
@@ -179,5 +182,13 @@ public class TestTruncatesResiduals {
     assertResidualValue(spec, startsWith("value", "bcd"), "ab", Expression.Operation.FALSE);
     assertResidualPredicate(spec, startsWith("value", "bcd"), "bc");
     assertResidualValue(spec, startsWith("value", "bcd"), "cd", Expression.Operation.FALSE);
+    assertResidualPredicate(spec, startsWith("value", "bcd"), "bcdd");
+
+    // not starts with
+    assertResidualValue(spec, notStartsWith("value", "bcd"), "ab", Expression.Operation.TRUE);
+    assertResidualPredicate(spec, notStartsWith("value", "bcd"), "bc");
+    assertResidualValue(spec, notStartsWith("value", "bcd"), "cd", Expression.Operation.TRUE);
+    assertResidualPredicate(spec, notStartsWith("value", "bcd"), "bcd");
+    assertResidualPredicate(spec, notStartsWith("value", "bcd"), "bcdd");
   }
 }

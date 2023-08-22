@@ -16,14 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
+
+import static org.apache.iceberg.NullOrder.NULLS_FIRST;
+import static org.apache.iceberg.NullOrder.NULLS_LAST;
+import static org.apache.iceberg.expressions.Expressions.bucket;
+import static org.apache.iceberg.expressions.Expressions.truncate;
+import static org.apache.iceberg.types.Types.NestedField.optional;
+import static org.apache.iceberg.types.Types.NestedField.required;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Set;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.SortOrderUtil;
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -33,37 +43,38 @@ import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import static org.apache.iceberg.NullOrder.NULLS_FIRST;
-import static org.apache.iceberg.NullOrder.NULLS_LAST;
-import static org.apache.iceberg.expressions.Expressions.truncate;
-import static org.apache.iceberg.types.Types.NestedField.optional;
-import static org.apache.iceberg.types.Types.NestedField.required;
-
 @RunWith(Parameterized.class)
 public class TestSortOrder {
 
   // column ids will be reassigned during table creation
-  private static final Schema SCHEMA = new Schema(
-      required(10, "id", Types.IntegerType.get()),
-      required(11, "data", Types.StringType.get()),
-      required(40, "d", Types.DateType.get()),
-      required(41, "ts", Types.TimestampType.withZone()),
-      optional(12, "s", Types.StructType.of(
-          required(17, "id", Types.IntegerType.get()),
-          optional(18, "b", Types.ListType.ofOptional(3, Types.StructType.of(
-              optional(19, "i", Types.IntegerType.get()),
-              optional(20, "s", Types.StringType.get())
-          )))
-      )),
-      required(30, "ext", Types.StringType.get()));
+  private static final Schema SCHEMA =
+      new Schema(
+          required(10, "id", Types.IntegerType.get()),
+          required(11, "data", Types.StringType.get()),
+          required(40, "d", Types.DateType.get()),
+          required(41, "ts", Types.TimestampType.withZone()),
+          optional(
+              12,
+              "s",
+              Types.StructType.of(
+                  required(17, "id", Types.IntegerType.get()),
+                  optional(
+                      18,
+                      "b",
+                      Types.ListType.ofOptional(
+                          3,
+                          Types.StructType.of(
+                              optional(19, "i", Types.IntegerType.get()),
+                              optional(20, "s", Types.StringType.get())))))),
+          required(30, "ext", Types.StringType.get()),
+          required(42, "Ext1", Types.StringType.get()));
 
-  @Rule
-  public TemporaryFolder temp = new TemporaryFolder();
+  @Rule public TemporaryFolder temp = new TemporaryFolder();
   private File tableDir = null;
 
   @Parameterized.Parameters(name = "formatVersion = {0}")
   public static Object[] parameters() {
-    return new Object[] { 1, 2 };
+    return new Object[] {1, 2};
   }
 
   private final int formatVersion;
@@ -84,16 +95,19 @@ public class TestSortOrder {
 
   @Test
   public void testSortOrderBuilder() {
-    Assert.assertEquals("Should be able to build unsorted order",
+    Assert.assertEquals(
+        "Should be able to build unsorted order",
         SortOrder.unsorted(),
         SortOrder.builderFor(SCHEMA).withOrderId(0).build());
 
-    AssertHelpers.assertThrows("Should not allow sort orders ID 0",
-        IllegalArgumentException.class, "order ID 0 is reserved for unsorted order",
-        () -> SortOrder.builderFor(SCHEMA).asc("data").withOrderId(0).build());
-    AssertHelpers.assertThrows("Should not allow unsorted orders with arbitrary IDs",
-        IllegalArgumentException.class, "order ID must be 0",
-        () -> SortOrder.builderFor(SCHEMA).withOrderId(1).build());
+    Assertions.assertThatThrownBy(
+            () -> SortOrder.builderFor(SCHEMA).asc("data").withOrderId(0).build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Sort order ID 0 is reserved for unsorted order");
+
+    Assertions.assertThatThrownBy(() -> SortOrder.builderFor(SCHEMA).withOrderId(1).build())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Unsorted order ID must be 0");
   }
 
   @Test
@@ -109,56 +123,56 @@ public class TestSortOrder {
 
   @Test
   public void testFreshIds() {
-    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA)
-        .withSpecId(5)
-        .identity("data")
-        .build();
-    SortOrder order = SortOrder.builderFor(SCHEMA)
-        .withOrderId(10)
-        .asc("s.id", NULLS_LAST)
-        .desc(truncate("data", 10), NULLS_FIRST)
-        .build();
-    TestTables.TestTable table = TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
+    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).withSpecId(5).identity("data").build();
+    SortOrder order =
+        SortOrder.builderFor(SCHEMA)
+            .withOrderId(10)
+            .asc("s.id", NULLS_LAST)
+            .desc(truncate("data", 10), NULLS_FIRST)
+            .build();
+    TestTables.TestTable table =
+        TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
 
     Assert.assertEquals("Expected 1 sort order", 1, table.sortOrders().size());
-    Assert.assertTrue("Order ID must be fresh", table.sortOrders().containsKey(TableMetadata.INITIAL_SORT_ORDER_ID));
+    Assert.assertTrue(
+        "Order ID must be fresh",
+        table.sortOrders().containsKey(TableMetadata.INITIAL_SORT_ORDER_ID));
 
     SortOrder actualOrder = table.sortOrder();
-    Assert.assertEquals("Order ID must be fresh", TableMetadata.INITIAL_SORT_ORDER_ID, actualOrder.orderId());
+    Assert.assertEquals(
+        "Order ID must be fresh", TableMetadata.INITIAL_SORT_ORDER_ID, actualOrder.orderId());
     Assert.assertEquals("Order must have 2 fields", 2, actualOrder.fields().size());
-    Assert.assertEquals("Field id must be fresh", 7, actualOrder.fields().get(0).sourceId());
+    Assert.assertEquals("Field id must be fresh", 8, actualOrder.fields().get(0).sourceId());
     Assert.assertEquals("Field id must be fresh", 2, actualOrder.fields().get(1).sourceId());
   }
 
   @Test
   public void testCompatibleOrders() {
-    SortOrder order1 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(9)
-        .asc("s.id", NULLS_LAST)
-        .build();
+    SortOrder order1 = SortOrder.builderFor(SCHEMA).withOrderId(9).asc("s.id", NULLS_LAST).build();
 
-    SortOrder order2 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(10)
-        .asc("s.id", NULLS_LAST)
-        .desc(truncate("data", 10), NULLS_FIRST)
-        .build();
+    SortOrder order2 =
+        SortOrder.builderFor(SCHEMA)
+            .withOrderId(10)
+            .asc("s.id", NULLS_LAST)
+            .desc(truncate("data", 10), NULLS_FIRST)
+            .build();
 
-    SortOrder order3 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(11)
-        .asc("s.id", NULLS_LAST)
-        .desc(truncate("data", 10), NULLS_LAST)
-        .build();
+    SortOrder order3 =
+        SortOrder.builderFor(SCHEMA)
+            .withOrderId(11)
+            .asc("s.id", NULLS_LAST)
+            .desc(truncate("data", 10), NULLS_LAST)
+            .build();
 
-    SortOrder order4 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(11)
-        .asc("s.id", NULLS_LAST)
-        .asc(truncate("data", 10), NULLS_FIRST)
-        .build();
+    SortOrder order4 =
+        SortOrder.builderFor(SCHEMA)
+            .withOrderId(11)
+            .asc("s.id", NULLS_LAST)
+            .asc(truncate("data", 10), NULLS_FIRST)
+            .build();
 
-    SortOrder order5 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(11)
-        .desc("s.id", NULLS_LAST)
-        .build();
+    SortOrder order5 =
+        SortOrder.builderFor(SCHEMA).withOrderId(11).desc("s.id", NULLS_LAST).build();
 
     // an unsorted order satisfies only itself
     Assert.assertTrue(SortOrder.unsorted().satisfies(SortOrder.unsorted()));
@@ -194,8 +208,10 @@ public class TestSortOrder {
   @Test
   public void testSatisfiesTruncateFieldOrder() {
     SortOrder id = SortOrder.builderFor(SCHEMA).asc("data", NULLS_LAST).build();
-    SortOrder truncate4 = SortOrder.builderFor(SCHEMA).asc(Expressions.truncate("data", 4), NULLS_LAST).build();
-    SortOrder truncate2 = SortOrder.builderFor(SCHEMA).asc(Expressions.truncate("data", 2), NULLS_LAST).build();
+    SortOrder truncate4 =
+        SortOrder.builderFor(SCHEMA).asc(Expressions.truncate("data", 4), NULLS_LAST).build();
+    SortOrder truncate2 =
+        SortOrder.builderFor(SCHEMA).asc(Expressions.truncate("data", 2), NULLS_LAST).build();
 
     Assert.assertTrue(id.satisfies(truncate2));
     Assert.assertTrue(id.satisfies(truncate4));
@@ -258,15 +274,9 @@ public class TestSortOrder {
 
   @Test
   public void testSameOrder() {
-    SortOrder order1 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(9)
-        .asc("s.id", NULLS_LAST)
-        .build();
+    SortOrder order1 = SortOrder.builderFor(SCHEMA).withOrderId(9).asc("s.id", NULLS_LAST).build();
 
-    SortOrder order2 = SortOrder.builderFor(SCHEMA)
-        .withOrderId(10)
-        .asc("s.id", NULLS_LAST)
-        .build();
+    SortOrder order2 = SortOrder.builderFor(SCHEMA).withOrderId(10).asc("s.id", NULLS_LAST).build();
 
     // orders have different ids but are logically the same
     Assert.assertNotEquals("Orders must not be equal", order1, order2);
@@ -277,42 +287,99 @@ public class TestSortOrder {
   @Test
   public void testSchemaEvolutionWithSortOrder() {
     PartitionSpec spec = PartitionSpec.unpartitioned();
-    SortOrder order = SortOrder.builderFor(SCHEMA)
-        .withOrderId(10)
-        .asc("s.id")
-        .desc(truncate("data", 10))
-        .build();
-    TestTables.TestTable table = TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
+    SortOrder order =
+        SortOrder.builderFor(SCHEMA).withOrderId(10).asc("s.id").desc(truncate("data", 10)).build();
+    TestTables.TestTable table =
+        TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
 
-    table.updateSchema()
-        .renameColumn("s.id", "s.id2")
-        .commit();
+    table.updateSchema().renameColumn("s.id", "s.id2").commit();
 
     SortOrder actualOrder = table.sortOrder();
-    Assert.assertEquals("Order ID must match", TableMetadata.INITIAL_SORT_ORDER_ID, actualOrder.orderId());
+    Assert.assertEquals(
+        "Order ID must match", TableMetadata.INITIAL_SORT_ORDER_ID, actualOrder.orderId());
     Assert.assertEquals("Order must have 2 fields", 2, actualOrder.fields().size());
-    Assert.assertEquals("Field id must match", 7, actualOrder.fields().get(0).sourceId());
+    Assert.assertEquals("Field id must match", 8, actualOrder.fields().get(0).sourceId());
     Assert.assertEquals("Field id must match", 2, actualOrder.fields().get(1).sourceId());
+  }
+
+  @Test
+  public void testColumnDropWithSortOrder() {
+    PartitionSpec spec = PartitionSpec.unpartitioned();
+
+    TestTables.TestTable table = TestTables.create(tableDir, "test", SCHEMA, spec, formatVersion);
+
+    int initialColSize = table.schema().columns().size();
+
+    table.replaceSortOrder().asc("id").commit();
+    table.replaceSortOrder().asc("data").commit();
+
+    table.updateSchema().deleteColumn("id").commit();
+
+    SortOrder actualOrder = table.sortOrder();
+    Assert.assertEquals(
+        "Order ID must match", TableMetadata.INITIAL_SORT_ORDER_ID + 1, actualOrder.orderId());
+    Assert.assertEquals(
+        "Schema must have one less column", initialColSize - 1, table.schema().columns().size());
+
+    // ensure that the table metadata can be serialized and reloaded with an invalid order
+    TableMetadataParser.fromJson(TableMetadataParser.toJson(table.ops().current()));
   }
 
   @Test
   public void testIncompatibleSchemaEvolutionWithSortOrder() {
     PartitionSpec spec = PartitionSpec.unpartitioned();
-    SortOrder order = SortOrder.builderFor(SCHEMA)
-        .withOrderId(10)
-        .asc("s.id")
-        .desc(truncate("data", 10))
-        .build();
-    TestTables.TestTable table = TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
+    SortOrder order =
+        SortOrder.builderFor(SCHEMA).withOrderId(10).asc("s.id").desc(truncate("data", 10)).build();
+    TestTables.TestTable table =
+        TestTables.create(tableDir, "test", SCHEMA, spec, order, formatVersion);
 
-    AssertHelpers.assertThrows("Should reject deletion of sort columns",
-        ValidationException.class, "Cannot find source column",
-        () -> table.updateSchema().deleteColumn("s.id").commit());
+    Assertions.assertThatThrownBy(() -> table.updateSchema().deleteColumn("s.id").commit())
+        .isInstanceOf(ValidationException.class)
+        .hasMessageStartingWith("Cannot find source column for sort field");
   }
 
   @Test
   public void testEmptySortOrder() {
     SortOrder order = SortOrder.builderFor(SCHEMA).build();
     Assert.assertEquals("Order must be unsorted", SortOrder.unsorted(), order);
+  }
+
+  @Test
+  public void testSortedColumnNames() {
+    SortOrder order =
+        SortOrder.builderFor(SCHEMA).withOrderId(10).asc("s.id").desc(truncate("data", 10)).build();
+    Set<String> sortedCols = SortOrderUtil.orderPreservingSortedColumns(order);
+    Assert.assertEquals(ImmutableSet.of("s.id", "data"), sortedCols);
+  }
+
+  @Test
+  public void testPreservingOrderSortedColumnNames() {
+    SortOrder order =
+        SortOrder.builderFor(SCHEMA)
+            .withOrderId(10)
+            .asc(bucket("s.id", 5))
+            .desc(truncate("data", 10))
+            .build();
+    Set<String> sortedCols = SortOrderUtil.orderPreservingSortedColumns(order);
+    Assert.assertEquals(ImmutableSet.of("data"), sortedCols);
+  }
+
+  @Test
+  public void testCaseSensitiveSortedColumnNames() {
+    String fieldName = "ext1";
+    Assertions.assertThatThrownBy(
+            () ->
+                SortOrder.builderFor(SCHEMA)
+                    .caseSensitive(true)
+                    .withOrderId(10)
+                    .asc(fieldName)
+                    .build())
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining(String.format("Cannot find field '%s' in struct", fieldName));
+
+    SortOrder ext1 =
+        SortOrder.builderFor(SCHEMA).caseSensitive(false).withOrderId(10).asc("ext1").build();
+    SortField sortField = ext1.fields().get(0);
+    Assert.assertEquals(sortField.sourceId(), SCHEMA.findField("Ext1").fieldId());
   }
 }

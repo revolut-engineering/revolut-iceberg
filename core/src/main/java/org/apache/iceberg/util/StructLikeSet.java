@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.util;
 
 import java.util.AbstractSet;
@@ -57,7 +56,7 @@ public class StructLikeSet extends AbstractSet<StructLike> implements Set<Struct
 
   @Override
   public boolean contains(Object obj) {
-    if (obj instanceof StructLike) {
+    if (obj instanceof StructLike || obj == null) {
       StructLikeWrapper wrapper = wrappers.get();
       boolean result = wrapperSet.contains(wrapper.set((StructLike) obj));
       wrapper.set(null); // don't hold a reference to the value
@@ -100,12 +99,12 @@ public class StructLikeSet extends AbstractSet<StructLike> implements Set<Struct
 
   @Override
   public boolean add(StructLike struct) {
-    return wrapperSet.add(StructLikeWrapper.forType(type).set(struct));
+    return wrapperSet.add(wrappers.get().copyFor(struct));
   }
 
   @Override
   public boolean remove(Object obj) {
-    if (obj instanceof StructLike) {
+    if (obj instanceof StructLike || obj == null) {
       StructLikeWrapper wrapper = wrappers.get();
       boolean result = wrapperSet.remove(wrapper.set((StructLike) obj));
       wrapper.set(null); // don't hold a reference to the value
@@ -125,8 +124,8 @@ public class StructLikeSet extends AbstractSet<StructLike> implements Set<Struct
   @Override
   public boolean addAll(Collection<? extends StructLike> structs) {
     if (structs != null) {
-      return Iterables.addAll(wrapperSet,
-          Iterables.transform(structs, struct -> StructLikeWrapper.forType(type).set(struct)));
+      return Iterables.addAll(
+          wrapperSet, Iterables.transform(structs, struct -> wrappers.get().copyFor(struct)));
     }
     return false;
   }
@@ -176,6 +175,6 @@ public class StructLikeSet extends AbstractSet<StructLike> implements Set<Struct
 
   @Override
   public int hashCode() {
-    return Objects.hash(type) + wrapperSet.stream().mapToInt(StructLikeWrapper::hashCode).sum();
+    return Objects.hashCode(type) + wrapperSet.stream().mapToInt(StructLikeWrapper::hashCode).sum();
   }
 }

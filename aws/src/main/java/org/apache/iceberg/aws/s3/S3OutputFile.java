@@ -16,30 +16,42 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.aws.s3;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import org.apache.iceberg.aws.AwsProperties;
+import org.apache.iceberg.encryption.NativeFileCryptoParameters;
+import org.apache.iceberg.encryption.NativelyEncryptedFile;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.io.PositionOutputStream;
+import org.apache.iceberg.metrics.MetricsContext;
 import software.amazon.awssdk.services.s3.S3Client;
 
-public class S3OutputFile extends BaseS3File implements OutputFile {
-  public S3OutputFile(S3Client client, S3URI uri) {
-    this(client, uri, new AwsProperties());
+public class S3OutputFile extends BaseS3File implements OutputFile, NativelyEncryptedFile {
+  private NativeFileCryptoParameters nativeEncryptionParameters;
+
+  public static S3OutputFile fromLocation(
+      String location,
+      S3Client client,
+      S3FileIOProperties s3FileIOProperties,
+      MetricsContext metrics) {
+    return new S3OutputFile(
+        client,
+        new S3URI(location, s3FileIOProperties.bucketToAccessPointMapping()),
+        s3FileIOProperties,
+        metrics);
   }
 
-  public S3OutputFile(S3Client client, S3URI uri, AwsProperties awsProperties) {
-    super(client, uri, awsProperties);
+  S3OutputFile(
+      S3Client client, S3URI uri, S3FileIOProperties s3FileIOProperties, MetricsContext metrics) {
+    super(client, uri, s3FileIOProperties, metrics);
   }
 
   /**
-   * Create an output stream for the specified location if the target object
-   * does not exist in S3 at the time of invocation.
+   * Create an output stream for the specified location if the target object does not exist in S3 at
+   * the time of invocation.
    *
    * @return output stream
    */
@@ -55,14 +67,24 @@ public class S3OutputFile extends BaseS3File implements OutputFile {
   @Override
   public PositionOutputStream createOrOverwrite() {
     try {
-      return new S3OutputStream(client(), uri(), awsProperties());
+      return new S3OutputStream(client(), uri(), s3FileIOProperties(), metrics());
     } catch (IOException e) {
-      throw new UncheckedIOException("Filed to create output stream for location: " + uri(), e);
+      throw new UncheckedIOException("Failed to create output stream for location: " + uri(), e);
     }
   }
 
   @Override
   public InputFile toInputFile() {
-    return new S3InputFile(client(), uri(), awsProperties());
+    return new S3InputFile(client(), uri(), null, s3FileIOProperties(), metrics());
+  }
+
+  @Override
+  public NativeFileCryptoParameters nativeCryptoParameters() {
+    return nativeEncryptionParameters;
+  }
+
+  @Override
+  public void setNativeCryptoParameters(NativeFileCryptoParameters nativeCryptoParameters) {
+    this.nativeEncryptionParameters = nativeCryptoParameters;
   }
 }

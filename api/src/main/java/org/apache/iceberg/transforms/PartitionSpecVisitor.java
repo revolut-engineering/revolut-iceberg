@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.transforms;
 
 import java.util.List;
@@ -87,7 +86,8 @@ public interface PartitionSpecVisitor<T> {
   }
 
   default T unknown(int fieldId, String sourceName, int sourceId, String transform) {
-    throw new UnsupportedOperationException(String.format("Unknown transform %s is not supported", transform));
+    throw new UnsupportedOperationException(
+        String.format("Unknown transform %s is not supported", transform));
   }
 
   /**
@@ -99,25 +99,10 @@ public interface PartitionSpecVisitor<T> {
    * @return a list of the result produced by visiting each partition field
    */
   static <R> List<R> visit(PartitionSpec spec, PartitionSpecVisitor<R> visitor) {
-    return visit(spec.schema(), spec, visitor);
-  }
-
-  /**
-   * Visit the fields of a {@link PartitionSpec}.
-   *
-   * @param schema a schema for source field lookups
-   * @param spec a partition spec to visit
-   * @param visitor a partition spec visitor
-   * @param <R> return type of the visitor
-   * @return a list of the result produced by visiting each partition field
-   * @deprecated this will be removed in 0.11.0; use {@link #visit(PartitionSpec, PartitionSpecVisitor)} instead.
-   */
-  @Deprecated
-  static <R> List<R> visit(Schema schema, PartitionSpec spec, PartitionSpecVisitor<R> visitor) {
     List<R> results = Lists.newArrayListWithExpectedSize(spec.fields().size());
 
     for (PartitionField field : spec.fields()) {
-      results.add(visit(schema, field, visitor));
+      results.add(visit(spec.schema(), field, visitor));
     }
 
     return results;
@@ -136,13 +121,17 @@ public interface PartitionSpecVisitor<T> {
     } else if (transform instanceof Truncate) {
       int width = ((Truncate<?>) transform).width();
       return visitor.truncate(field.fieldId(), sourceName, field.sourceId(), width);
-    } else if (transform == Dates.YEAR || transform == Timestamps.YEAR) {
+    } else if (transform == Dates.YEAR
+        || transform == Timestamps.YEAR
+        || transform instanceof Years) {
       return visitor.year(field.fieldId(), sourceName, field.sourceId());
-    } else if (transform == Dates.MONTH || transform == Timestamps.MONTH) {
+    } else if (transform == Dates.MONTH
+        || transform == Timestamps.MONTH
+        || transform instanceof Months) {
       return visitor.month(field.fieldId(), sourceName, field.sourceId());
-    } else if (transform == Dates.DAY || transform == Timestamps.DAY) {
+    } else if (transform == Dates.DAY || transform == Timestamps.DAY || transform instanceof Days) {
       return visitor.day(field.fieldId(), sourceName, field.sourceId());
-    } else if (transform == Timestamps.HOUR) {
+    } else if (transform == Timestamps.HOUR || transform instanceof Hours) {
       return visitor.hour(field.fieldId(), sourceName, field.sourceId());
     } else if (transform instanceof VoidTransform) {
       return visitor.alwaysNull(field.fieldId(), sourceName, field.sourceId());

@@ -16,48 +16,62 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.aws.s3;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
-import org.apache.iceberg.aws.AwsProperties;
+import org.apache.iceberg.exceptions.NotFoundException;
+import org.apache.iceberg.io.FileIOMetricsContext;
+import org.apache.iceberg.io.IOUtil;
+import org.apache.iceberg.io.RangeReadable;
 import org.apache.iceberg.io.SeekableInputStream;
+import org.apache.iceberg.metrics.Counter;
+import org.apache.iceberg.metrics.MetricsContext;
+import org.apache.iceberg.metrics.MetricsContext.Unit;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.io.ByteStreams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
+import software.amazon.awssdk.http.Abortable;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
-class S3InputStream extends SeekableInputStream {
+class S3InputStream extends SeekableInputStream implements RangeReadable {
   private static final Logger LOG = LoggerFactory.getLogger(S3InputStream.class);
 
   private final StackTraceElement[] createStack;
   private final S3Client s3;
   private final S3URI location;
-  private final AwsProperties awsProperties;
+  private final S3FileIOProperties s3FileIOProperties;
 
   private InputStream stream;
   private long pos = 0;
   private long next = 0;
   private boolean closed = false;
 
+  private final Counter readBytes;
+  private final Counter readOperations;
+
   private int skipSize = 1024 * 1024;
 
   S3InputStream(S3Client s3, S3URI location) {
-    this(s3, location, new AwsProperties());
+    this(s3, location, new S3FileIOProperties(), MetricsContext.nullMetrics());
   }
 
-  S3InputStream(S3Client s3, S3URI location, AwsProperties awsProperties) {
+  S3InputStream(
+      S3Client s3, S3URI location, S3FileIOProperties s3FileIOProperties, MetricsContext metrics) {
     this.s3 = s3;
     this.location = location;
-    this.awsProperties = awsProperties;
+    this.s3FileIOProperties = s3FileIOProperties;
 
-    createStack = Thread.currentThread().getStackTrace();
+    this.readBytes = metrics.counter(FileIOMetricsContext.READ_BYTES, Unit.BYTES);
+    this.readOperations = metrics.counter(FileIOMetricsContext.READ_OPERATIONS);
+
+    this.createStack = Thread.currentThread().getStackTrace();
   }
 
   @Override
@@ -81,6 +95,8 @@ class S3InputStream extends SeekableInputStream {
 
     pos += 1;
     next += 1;
+    readBytes.increment();
+    readOperations.increment();
 
     return stream.read();
   }
@@ -93,8 +109,37 @@ class S3InputStream extends SeekableInputStream {
     int bytesRead = stream.read(b, off, len);
     pos += bytesRead;
     next += bytesRead;
+    readBytes.increment(bytesRead);
+    readOperations.increment();
 
     return bytesRead;
+  }
+
+  @Override
+  public void readFully(long position, byte[] buffer, int offset, int length) throws IOException {
+    Preconditions.checkPositionIndexes(offset, offset + length, buffer.length);
+
+    String range = String.format("bytes=%s-%s", position, position + length - 1);
+
+    IOUtil.readFully(readRange(range), buffer, offset, length);
+  }
+
+  @Override
+  public int readTail(byte[] buffer, int offset, int length) throws IOException {
+    Preconditions.checkPositionIndexes(offset, offset + length, buffer.length);
+
+    String range = String.format("bytes=-%s", length);
+
+    return IOUtil.readRemaining(readRange(range), buffer, offset, length);
+  }
+
+  private InputStream readRange(String range) {
+    GetObjectRequest.Builder requestBuilder =
+        GetObjectRequest.builder().bucket(location.bucket()).key(location.key()).range(range);
+
+    S3RequestUtil.configureEncryption(s3FileIOProperties, requestBuilder);
+
+    return s3.getObject(requestBuilder.build(), ResponseTransformer.toInputStream());
   }
 
   @Override
@@ -133,20 +178,48 @@ class S3InputStream extends SeekableInputStream {
   }
 
   private void openStream() throws IOException {
-    GetObjectRequest.Builder requestBuilder = GetObjectRequest.builder()
-        .bucket(location.bucket())
-        .key(location.key())
-        .range(String.format("bytes=%s-", pos));
+    GetObjectRequest.Builder requestBuilder =
+        GetObjectRequest.builder()
+            .bucket(location.bucket())
+            .key(location.key())
+            .range(String.format("bytes=%s-", pos));
 
-    S3RequestUtil.configureEncryption(awsProperties, requestBuilder);
+    S3RequestUtil.configureEncryption(s3FileIOProperties, requestBuilder);
 
     closeStream();
-    stream = s3.getObject(requestBuilder.build(), ResponseTransformer.toInputStream());
+
+    try {
+      stream = s3.getObject(requestBuilder.build(), ResponseTransformer.toInputStream());
+    } catch (NoSuchKeyException e) {
+      throw new NotFoundException(e, "Location does not exist: %s", location);
+    }
   }
 
   private void closeStream() throws IOException {
     if (stream != null) {
-      stream.close();
+      // if we aren't at the end of the stream, and the stream is abortable, then
+      // call abort() so we don't read the remaining data with the Apache HTTP client
+      abortStream();
+      try {
+        stream.close();
+      } catch (IOException e) {
+        // the Apache HTTP client will throw a ConnectionClosedException
+        // when closing an aborted stream, which is expected
+        if (!e.getClass().getSimpleName().equals("ConnectionClosedException")) {
+          throw e;
+        }
+      }
+      stream = null;
+    }
+  }
+
+  private void abortStream() {
+    try {
+      if (stream instanceof Abortable && stream.read() != -1) {
+        ((Abortable) stream).abort();
+      }
+    } catch (Exception e) {
+      LOG.warn("An error occurred while aborting the stream", e);
     }
   }
 
@@ -160,8 +233,7 @@ class S3InputStream extends SeekableInputStream {
     super.finalize();
     if (!closed) {
       close(); // releasing resources is more important than printing the warning
-      String trace = Joiner.on("\n\t").join(
-          Arrays.copyOfRange(createStack, 1, createStack.length));
+      String trace = Joiner.on("\n\t").join(Arrays.copyOfRange(createStack, 1, createStack.length));
       LOG.warn("Unclosed input stream created by:\n\t{}", trace);
     }
   }

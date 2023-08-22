@@ -16,19 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
+
+import static org.apache.iceberg.types.Types.NestedField.optional;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.DataFiles.Builder;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.Types;
+import org.assertj.core.api.Assertions;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -37,37 +42,35 @@ import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import static org.apache.iceberg.types.Types.NestedField.optional;
-
 @RunWith(Parameterized.class)
 public class TestSplitPlanning extends TableTestBase {
 
   private static final Configuration CONF = new Configuration();
   private static final HadoopTables TABLES = new HadoopTables(CONF);
-  private static final Schema SCHEMA = new Schema(
-      optional(1, "id", Types.IntegerType.get()),
-      optional(2, "data", Types.StringType.get())
-  );
+  private static final Schema SCHEMA =
+      new Schema(
+          optional(1, "id", Types.IntegerType.get()), optional(2, "data", Types.StringType.get()));
 
-  @Rule
-  public TemporaryFolder temp = new TemporaryFolder();
+  @Rule public TemporaryFolder temp = new TemporaryFolder();
   private Table table = null;
 
   @Parameterized.Parameters(name = "formatVersion = {0}")
   public static Object[] parameters() {
-    return new Object[] { 1, 2 };
+    return new Object[] {1, 2};
   }
 
   public TestSplitPlanning(int formatVersion) {
     super(formatVersion);
   }
 
+  @Override
   @Before
   public void setupTable() throws IOException {
     File tableDir = temp.newFolder();
     String tableLocation = tableDir.toURI().toString();
     table = TABLES.create(SCHEMA, tableLocation);
-    table.updateProperties()
+    table
+        .updateProperties()
         .set(TableProperties.SPLIT_SIZE, String.valueOf(128 * 1024 * 1024))
         .set(TableProperties.SPLIT_OPEN_FILE_COST, String.valueOf(4 * 1024 * 1024))
         .set(TableProperties.SPLIT_LOOKBACK, String.valueOf(Integer.MAX_VALUE))
@@ -103,9 +106,7 @@ public class TestSplitPlanning extends TableTestBase {
 
   @Test
   public void testSplitPlanningWithNoMinWeight() {
-    table.updateProperties()
-        .set(TableProperties.SPLIT_OPEN_FILE_COST, "0")
-        .commit();
+    table.updateProperties().set(TableProperties.SPLIT_OPEN_FILE_COST, "0").commit();
     List<DataFile> files60Mb = newFiles(2, 60 * 1024 * 1024);
     List<DataFile> files5Kb = newFiles(100, 5 * 1024);
     Iterable<DataFile> files = Iterables.concat(files60Mb, files5Kb);
@@ -119,8 +120,8 @@ public class TestSplitPlanning extends TableTestBase {
     List<DataFile> files128Mb = newFiles(4, 128 * 1024 * 1024);
     appendFiles(files128Mb);
     // we expect 2 bins since we are overriding split size in scan with 256MB
-    TableScan scan = table.newScan()
-        .option(TableProperties.SPLIT_SIZE, String.valueOf(256L * 1024 * 1024));
+    TableScan scan =
+        table.newScan().option(TableProperties.SPLIT_SIZE, String.valueOf(256L * 1024 * 1024));
     Assert.assertEquals(2, Iterables.size(scan.planTasks()));
   }
 
@@ -129,8 +130,8 @@ public class TestSplitPlanning extends TableTestBase {
     List<DataFile> files8Mb = newFiles(32, 8 * 1024 * 1024, FileFormat.METADATA);
     appendFiles(files8Mb);
     // we expect 16 bins since we are overriding split size in scan with 16MB
-    TableScan scan = table.newScan()
-        .option(TableProperties.SPLIT_SIZE, String.valueOf(16L * 1024 * 1024));
+    TableScan scan =
+        table.newScan().option(TableProperties.SPLIT_SIZE, String.valueOf(16L * 1024 * 1024));
     Assert.assertEquals(16, Iterables.size(scan.planTasks()));
   }
 
@@ -138,9 +139,10 @@ public class TestSplitPlanning extends TableTestBase {
   public void testSplitPlanningWithOverriddenSizeForLargeMetadataJsonFile() {
     List<DataFile> files128Mb = newFiles(4, 128 * 1024 * 1024, FileFormat.METADATA);
     appendFiles(files128Mb);
-    // although overriding split size in scan with 8MB, we expect 4 bins since metadata file is not splittable
-    TableScan scan = table.newScan()
-        .option(TableProperties.SPLIT_SIZE, String.valueOf(8L * 1024 * 1024));
+    // although overriding split size in scan with 8MB, we expect 4 bins since metadata file is not
+    // splittable
+    TableScan scan =
+        table.newScan().option(TableProperties.SPLIT_SIZE, String.valueOf(8L * 1024 * 1024));
     Assert.assertEquals(4, Iterables.size(scan.planTasks()));
   }
 
@@ -151,8 +153,7 @@ public class TestSplitPlanning extends TableTestBase {
     Iterable<DataFile> files = Iterables.concat(files120Mb, file128Mb);
     appendFiles(files);
     // we expect 2 bins from non-overriden table properties
-    TableScan scan = table.newScan()
-        .option(TableProperties.SPLIT_LOOKBACK, "1");
+    TableScan scan = table.newScan().option(TableProperties.SPLIT_LOOKBACK, "1");
     CloseableIterable<CombinedScanTask> tasks = scan.planTasks();
     Assert.assertEquals(2, Iterables.size(tasks));
 
@@ -168,9 +169,119 @@ public class TestSplitPlanning extends TableTestBase {
     appendFiles(files16Mb);
     // we expect 4 bins since we are overriding open file cost in scan with a cost of 32MB
     // we can fit at most 128Mb/32Mb = 4 files per bin
-    TableScan scan = table.newScan()
-        .option(TableProperties.SPLIT_OPEN_FILE_COST, String.valueOf(32L * 1024 * 1024));
+    TableScan scan =
+        table
+            .newScan()
+            .option(TableProperties.SPLIT_OPEN_FILE_COST, String.valueOf(32L * 1024 * 1024));
     Assert.assertEquals(4, Iterables.size(scan.planTasks()));
+  }
+
+  @Test
+  public void testSplitPlanningWithNegativeValues() {
+    Assertions.assertThatThrownBy(
+            () ->
+                table.newScan().option(TableProperties.SPLIT_SIZE, String.valueOf(-10)).planTasks())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Split size must be > 0: -10");
+
+    Assertions.assertThatThrownBy(
+            () ->
+                table
+                    .newScan()
+                    .option(TableProperties.SPLIT_LOOKBACK, String.valueOf(-10))
+                    .planTasks())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Split planning lookback must be > 0: -10");
+
+    Assertions.assertThatThrownBy(
+            () ->
+                table
+                    .newScan()
+                    .option(TableProperties.SPLIT_OPEN_FILE_COST, String.valueOf(-10))
+                    .planTasks())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("File open cost must be >= 0: -10");
+  }
+
+  @Test
+  public void testSplitPlanningWithOffsets() {
+    List<DataFile> files16Mb = newFiles(16, 16 * 1024 * 1024, 2);
+    appendFiles(files16Mb);
+
+    // Split Size is slightly larger than rowGroup Size, but we should still end up with
+    // 1 split per row group
+    TableScan scan =
+        table.newScan().option(TableProperties.SPLIT_SIZE, String.valueOf(10L * 1024 * 1024));
+    Assert.assertEquals(
+        "We should get one task per row group", 32, Iterables.size(scan.planTasks()));
+  }
+
+  @Test
+  public void testSplitPlanningWithOffsetsUnableToSplit() {
+    List<DataFile> files16Mb = newFiles(16, 16 * 1024 * 1024, 2);
+    appendFiles(files16Mb);
+
+    // Split Size does not match up with offsets, so even though we want 4 cuts per file we still
+    // only get 2
+    TableScan scan =
+        table
+            .newScan()
+            .option(TableProperties.SPLIT_OPEN_FILE_COST, String.valueOf(0))
+            .option(TableProperties.SPLIT_SIZE, String.valueOf(4L * 1024 * 1024));
+    Assert.assertEquals(
+        "We should still only get 2 tasks per file", 32, Iterables.size(scan.planTasks()));
+  }
+
+  @Test
+  public void testBasicSplitPlanningDeleteFiles() {
+    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+    List<DeleteFile> files128Mb = newDeleteFiles(4, 128 * 1024 * 1024);
+    appendDeleteFiles(files128Mb);
+
+    PositionDeletesTable posDeletesTable = new PositionDeletesTable(table);
+    // we expect 4 bins since split size is 128MB and we have 4 files 128MB each
+    Assert.assertEquals(4, Iterables.size(posDeletesTable.newBatchScan().planTasks()));
+    List<DeleteFile> files32Mb = newDeleteFiles(16, 32 * 1024 * 1024);
+    appendDeleteFiles(files32Mb);
+    // we expect 8 bins after we add 16 files 32MB each as they will form additional 4 bins
+    Assert.assertEquals(8, Iterables.size(posDeletesTable.newBatchScan().planTasks()));
+  }
+
+  @Test
+  public void testBasicSplitPlanningDeleteFilesWithSplitOffsets() {
+    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+    List<DeleteFile> files128Mb = newDeleteFiles(4, 128 * 1024 * 1024, 8);
+    appendDeleteFiles(files128Mb);
+
+    PositionDeletesTable posDeletesTable = new PositionDeletesTable(table);
+
+    try (CloseableIterable<ScanTaskGroup<ScanTask>> groups =
+        posDeletesTable
+            .newBatchScan()
+            .option(TableProperties.SPLIT_SIZE, String.valueOf(64L * 1024 * 1024))
+            .planTasks()) {
+      int totalTaskGroups = 0;
+      for (ScanTaskGroup<ScanTask> group : groups) {
+        int tasksPerGroup = 0;
+        long previousOffset = -1;
+        for (ScanTask task : group.tasks()) {
+          tasksPerGroup++;
+          Assert.assertTrue(task instanceof SplitPositionDeletesScanTask);
+          SplitPositionDeletesScanTask splitPosDelTask = (SplitPositionDeletesScanTask) task;
+          if (previousOffset != -1) {
+            Assert.assertEquals(splitPosDelTask.start(), previousOffset);
+          }
+          previousOffset = splitPosDelTask.start() + splitPosDelTask.length();
+        }
+
+        Assert.assertEquals("Should have 1 task as result of task merge", 1, tasksPerGroup);
+        totalTaskGroups++;
+      }
+      // we expect 8 bins since split size is 64MB
+      Assert.assertEquals(8, totalTaskGroups);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private void appendFiles(Iterable<DataFile> files) {
@@ -180,23 +291,89 @@ public class TestSplitPlanning extends TableTestBase {
   }
 
   private List<DataFile> newFiles(int numFiles, long sizeInBytes) {
-    return newFiles(numFiles, sizeInBytes, FileFormat.PARQUET);
+    return newFiles(numFiles, sizeInBytes, FileFormat.PARQUET, 1);
+  }
+
+  private List<DataFile> newFiles(int numFiles, long sizeInBytes, int numOffset) {
+    return newFiles(numFiles, sizeInBytes, FileFormat.PARQUET, numOffset);
   }
 
   private List<DataFile> newFiles(int numFiles, long sizeInBytes, FileFormat fileFormat) {
+    return newFiles(numFiles, sizeInBytes, fileFormat, 1);
+  }
+
+  private List<DataFile> newFiles(
+      int numFiles, long sizeInBytes, FileFormat fileFormat, int numOffset) {
     List<DataFile> files = Lists.newArrayList();
     for (int fileNum = 0; fileNum < numFiles; fileNum++) {
-      files.add(newFile(sizeInBytes, fileFormat));
+      files.add(newFile(sizeInBytes, fileFormat, numOffset));
     }
     return files;
   }
 
-  private DataFile newFile(long sizeInBytes, FileFormat fileFormat) {
+  private DataFile newFile(long sizeInBytes, FileFormat fileFormat, int numOffsets) {
     String fileName = UUID.randomUUID().toString();
-    return DataFiles.builder(PartitionSpec.unpartitioned())
-        .withPath(fileFormat.addExtension(fileName))
-        .withFileSizeInBytes(sizeInBytes)
-        .withRecordCount(2)
-        .build();
+    Builder builder =
+        DataFiles.builder(PartitionSpec.unpartitioned())
+            .withPath(fileFormat.addExtension(fileName))
+            .withFileSizeInBytes(sizeInBytes)
+            .withRecordCount(2);
+
+    if (numOffsets > 1) {
+      long stepSize = sizeInBytes / numOffsets;
+      List<Long> offsets =
+          LongStream.range(0, numOffsets)
+              .map(i -> i * stepSize)
+              .boxed()
+              .collect(Collectors.toList());
+      builder.withSplitOffsets(offsets);
+    }
+
+    return builder.build();
+  }
+
+  private void appendDeleteFiles(List<DeleteFile> files) {
+    RowDelta rowDelta = table.newRowDelta();
+    files.forEach(rowDelta::addDeletes);
+    rowDelta.commit();
+  }
+
+  private List<DeleteFile> newDeleteFiles(int numFiles, long sizeInBytes) {
+    return newDeleteFiles(numFiles, sizeInBytes, FileFormat.PARQUET, 1);
+  }
+
+  private List<DeleteFile> newDeleteFiles(int numFiles, long sizeInBytes, long numOffsets) {
+    return newDeleteFiles(numFiles, sizeInBytes, FileFormat.PARQUET, numOffsets);
+  }
+
+  private List<DeleteFile> newDeleteFiles(
+      int numFiles, long sizeInBytes, FileFormat fileFormat, long numOffsets) {
+    List<DeleteFile> files = Lists.newArrayList();
+    for (int fileNum = 0; fileNum < numFiles; fileNum++) {
+      files.add(newDeleteFile(sizeInBytes, fileFormat, numOffsets));
+    }
+    return files;
+  }
+
+  private DeleteFile newDeleteFile(long sizeInBytes, FileFormat fileFormat, long numOffsets) {
+    String fileName = UUID.randomUUID().toString();
+    FileMetadata.Builder builder =
+        FileMetadata.deleteFileBuilder(PartitionSpec.unpartitioned())
+            .ofPositionDeletes()
+            .withPath(fileFormat.addExtension(fileName))
+            .withFileSizeInBytes(sizeInBytes)
+            .withRecordCount(2);
+
+    if (numOffsets > 1) {
+      long stepSize = sizeInBytes / numOffsets;
+      List<Long> offsets =
+          LongStream.range(0, numOffsets)
+              .map(i -> i * stepSize)
+              .boxed()
+              .collect(Collectors.toList());
+      builder.withSplitOffsets(offsets);
+    }
+
+    return builder.build();
   }
 }

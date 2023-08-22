@@ -16,33 +16,32 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.io;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.StructLike;
+import org.apache.iceberg.deletes.PositionDelete;
 import org.apache.iceberg.deletes.PositionDeleteWriter;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Comparators;
 import org.apache.iceberg.util.CharSequenceSet;
 import org.apache.iceberg.util.CharSequenceWrapper;
 
-class SortedPosDeleteWriter<T> implements Closeable {
+class SortedPosDeleteWriter<T> implements FileWriter<PositionDelete<T>, DeleteWriteResult> {
   private static final long DEFAULT_RECORDS_NUM_THRESHOLD = 100_000L;
 
   private final Map<CharSequenceWrapper, List<PosRow<T>>> posDeletes = Maps.newHashMap();
   private final List<DeleteFile> completedFiles = Lists.newArrayList();
-  private final Set<CharSequence> referencedDataFiles = CharSequenceSet.empty();
+  private final CharSequenceSet referencedDataFiles = CharSequenceSet.empty();
   private final CharSequenceWrapper wrapper = CharSequenceWrapper.wrap(null);
 
   private final FileAppenderFactory<T> appenderFactory;
@@ -52,12 +51,15 @@ class SortedPosDeleteWriter<T> implements Closeable {
   private final long recordsNumThreshold;
 
   private int records = 0;
+  private boolean closed = false;
+  private Throwable failure;
 
-  SortedPosDeleteWriter(FileAppenderFactory<T> appenderFactory,
-                        OutputFileFactory fileFactory,
-                        FileFormat format,
-                        StructLike partition,
-                        long recordsNumThreshold) {
+  SortedPosDeleteWriter(
+      FileAppenderFactory<T> appenderFactory,
+      OutputFileFactory fileFactory,
+      FileFormat format,
+      StructLike partition,
+      long recordsNumThreshold) {
     this.appenderFactory = appenderFactory;
     this.fileFactory = fileFactory;
     this.format = format;
@@ -65,11 +67,29 @@ class SortedPosDeleteWriter<T> implements Closeable {
     this.recordsNumThreshold = recordsNumThreshold;
   }
 
-  SortedPosDeleteWriter(FileAppenderFactory<T> appenderFactory,
-                        OutputFileFactory fileFactory,
-                        FileFormat format,
-                        StructLike partition) {
+  SortedPosDeleteWriter(
+      FileAppenderFactory<T> appenderFactory,
+      OutputFileFactory fileFactory,
+      FileFormat format,
+      StructLike partition) {
     this(appenderFactory, fileFactory, format, partition, DEFAULT_RECORDS_NUM_THRESHOLD);
+  }
+
+  protected void setFailure(Throwable throwable) {
+    if (failure == null) {
+      this.failure = throwable;
+    }
+  }
+
+  @Override
+  public long length() {
+    throw new UnsupportedOperationException(
+        this.getClass().getName() + " does not implement length");
+  }
+
+  @Override
+  public void write(PositionDelete<T> payload) {
+    delete(payload.path(), payload.pos(), payload.row());
   }
 
   public void delete(CharSequence path, long pos) {
@@ -86,7 +106,8 @@ class SortedPosDeleteWriter<T> implements Closeable {
 
     records += 1;
 
-    // TODO Flush buffer based on the policy that checking whether whole heap memory size exceed the threshold.
+    // TODO Flush buffer based on the policy that checking whether whole heap memory size exceed the
+    // threshold.
     if (records >= recordsNumThreshold) {
       flushDeletes();
     }
@@ -95,16 +116,27 @@ class SortedPosDeleteWriter<T> implements Closeable {
   public List<DeleteFile> complete() throws IOException {
     close();
 
+    Preconditions.checkState(failure == null, "Cannot return results from failed writer", failure);
+
     return completedFiles;
   }
 
-  public Set<CharSequence> referencedDataFiles() {
+  public CharSequenceSet referencedDataFiles() {
     return referencedDataFiles;
   }
 
   @Override
   public void close() throws IOException {
-    flushDeletes();
+    if (!closed) {
+      this.closed = true;
+      flushDeletes();
+    }
+  }
+
+  @Override
+  public DeleteWriteResult result() {
+    Preconditions.checkState(closed, "Cannot get result from unclosed writer");
+    return new DeleteWriteResult(completedFiles, referencedDataFiles);
   }
 
   private void flushDeletes() {
@@ -120,7 +152,9 @@ class SortedPosDeleteWriter<T> implements Closeable {
       outputFile = fileFactory.newOutputFile(partition);
     }
 
-    PositionDeleteWriter<T> writer = appenderFactory.newPosDeleteWriter(outputFile, format, partition);
+    PositionDeleteWriter<T> writer =
+        appenderFactory.newPosDeleteWriter(outputFile, format, partition);
+    PositionDelete<T> posDelete = PositionDelete.create();
     try (PositionDeleteWriter<T> closeableWriter = writer) {
       // Sort all the paths.
       List<CharSequence> paths = Lists.newArrayListWithCapacity(posDeletes.keySet().size());
@@ -134,11 +168,15 @@ class SortedPosDeleteWriter<T> implements Closeable {
         List<PosRow<T>> positions = posDeletes.get(wrapper.set(path));
         positions.sort(Comparator.comparingLong(PosRow::pos));
 
-        positions.forEach(posRow -> closeableWriter.delete(path, posRow.pos(), posRow.row()));
+        positions.forEach(
+            posRow -> closeableWriter.write(posDelete.set(path, posRow.pos(), posRow.row())));
       }
     } catch (IOException e) {
-      throw new UncheckedIOException("Failed to write the sorted path/pos pairs to pos-delete file: " +
-          outputFile.encryptingOutputFile().location(), e);
+      setFailure(e);
+      throw new UncheckedIOException(
+          "Failed to write the sorted path/pos pairs to pos-delete file: "
+              + outputFile.encryptingOutputFile().location(),
+          e);
     }
 
     // Clear the buffered pos-deletions.

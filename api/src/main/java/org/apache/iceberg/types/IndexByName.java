@@ -16,16 +16,18 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.types;
 
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+import org.apache.iceberg.relocated.com.google.common.collect.Iterators;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
@@ -36,12 +38,22 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
   private final Deque<String> shortFieldNames = Lists.newLinkedList();
   private final Map<String, Integer> nameToId = Maps.newHashMap();
   private final Map<String, Integer> shortNameToId = Maps.newHashMap();
+  private final Function<String, String> quotingFunc;
+
+  public IndexByName() {
+    this(Function.identity());
+  }
+
+  public IndexByName(Function<String, String> quotingFunc) {
+    this.quotingFunc = quotingFunc;
+  }
 
   /**
    * Returns a mapping from full field name to ID.
-   * <p>
-   * Short names for maps and lists are included for any name that does not conflict with a canonical name. For example,
-   * a list, 'l', of structs with field 'x' will produce short name 'l.x' in addition to canonical name 'l.element.x'.
+   *
+   * <p>Short names for maps and lists are included for any name that does not conflict with a
+   * canonical name. For example, a list, 'l', of structs with field 'x' will produce short name
+   * 'l.x' in addition to canonical name 'l.element.x'.
    *
    * @return a map from name to field ID
    */
@@ -57,8 +69,9 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
 
   /**
    * Returns a mapping from field ID to full name.
-   * <p>
-   * Canonical names, not short names are returned, for example 'list.element.field' instead of 'list.field'.
+   *
+   * <p>Canonical names, not short names are returned, for example 'list.element.field' instead of
+   * 'list.field'.
    *
    * @return a map from field ID to name
    */
@@ -84,7 +97,8 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
   public void beforeListElement(Types.NestedField elementField) {
     fieldNames.push(elementField.name());
 
-    // only add "element" to the short name if the element is not a struct, so that names are more natural
+    // only add "element" to the short name if the element is not a struct, so that names are more
+    // natural
     // for example, locations.latitude instead of locations.element.latitude
     if (!elementField.type().isStructType()) {
       shortFieldNames.push(elementField.name());
@@ -137,7 +151,8 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
   }
 
   @Override
-  public Map<String, Integer> struct(Types.StructType struct, List<Map<String, Integer>> fieldResults) {
+  public Map<String, Integer> struct(
+      Types.StructType struct, List<Map<String, Integer>> fieldResults) {
     return nameToId;
   }
 
@@ -154,7 +169,8 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
   }
 
   @Override
-  public Map<String, Integer> map(Types.MapType map, Map<String, Integer> keyResult, Map<String, Integer> valueResult) {
+  public Map<String, Integer> map(
+      Types.MapType map, Map<String, Integer> keyResult, Map<String, Integer> valueResult) {
     addField("key", map.keyId());
     addField("value", map.valueId());
     return nameToId;
@@ -166,18 +182,28 @@ public class IndexByName extends TypeUtil.SchemaVisitor<Map<String, Integer>> {
   }
 
   private void addField(String name, int fieldId) {
-    String fullName = name;
+    String quotedName = quotingFunc.apply(name);
+
+    String fullName = quotedName;
     if (!fieldNames.isEmpty()) {
-      fullName = DOT.join(DOT.join(fieldNames.descendingIterator()), name);
+      Iterator<String> quotedFieldNames =
+          Iterators.transform(fieldNames.descendingIterator(), quotingFunc::apply);
+      fullName = DOT.join(DOT.join(quotedFieldNames), quotedName);
     }
 
     Integer existingFieldId = nameToId.put(fullName, fieldId);
-    ValidationException.check(existingFieldId == null,
-        "Invalid schema: multiple fields for name %s: %s and %s", fullName, existingFieldId, fieldId);
+    ValidationException.check(
+        existingFieldId == null,
+        "Invalid schema: multiple fields for name %s: %s and %s",
+        fullName,
+        existingFieldId,
+        fieldId);
 
     // also track the short name, if this is a nested field
     if (!shortFieldNames.isEmpty()) {
-      String shortName = DOT.join(DOT.join(shortFieldNames.descendingIterator()), name);
+      Iterator<String> quotedShortFieldNames =
+          Iterators.transform(shortFieldNames.descendingIterator(), quotingFunc::apply);
+      String shortName = DOT.join(DOT.join(quotedShortFieldNames), quotedName);
       if (!shortNameToId.containsKey(shortName)) {
         shortNameToId.put(shortName, fieldId);
       }

@@ -16,21 +16,54 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.aws.s3;
 
-import org.apache.iceberg.aws.AwsProperties;
+import org.apache.iceberg.encryption.NativeFileCryptoParameters;
+import org.apache.iceberg.encryption.NativelyEncryptedFile;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.SeekableInputStream;
+import org.apache.iceberg.metrics.MetricsContext;
 import software.amazon.awssdk.services.s3.S3Client;
 
-public class S3InputFile extends BaseS3File implements InputFile {
-  public S3InputFile(S3Client client, S3URI uri) {
-    this(client, uri, new AwsProperties());
+public class S3InputFile extends BaseS3File implements InputFile, NativelyEncryptedFile {
+  private NativeFileCryptoParameters nativeDecryptionParameters;
+  private Long length;
+
+  public static S3InputFile fromLocation(
+      String location,
+      S3Client client,
+      S3FileIOProperties s3FileIOProperties,
+      MetricsContext metrics) {
+    return new S3InputFile(
+        client,
+        new S3URI(location, s3FileIOProperties.bucketToAccessPointMapping()),
+        null,
+        s3FileIOProperties,
+        metrics);
   }
 
-  public S3InputFile(S3Client client, S3URI uri, AwsProperties awsProperties) {
-    super(client, uri, awsProperties);
+  public static S3InputFile fromLocation(
+      String location,
+      long length,
+      S3Client client,
+      S3FileIOProperties s3FileIOProperties,
+      MetricsContext metrics) {
+    return new S3InputFile(
+        client,
+        new S3URI(location, s3FileIOProperties.bucketToAccessPointMapping()),
+        length > 0 ? length : null,
+        s3FileIOProperties,
+        metrics);
+  }
+
+  S3InputFile(
+      S3Client client,
+      S3URI uri,
+      Long length,
+      S3FileIOProperties s3FileIOProperties,
+      MetricsContext metrics) {
+    super(client, uri, s3FileIOProperties, metrics);
+    this.length = length;
   }
 
   /**
@@ -40,12 +73,25 @@ public class S3InputFile extends BaseS3File implements InputFile {
    */
   @Override
   public long getLength() {
-    return getObjectMetadata().contentLength();
+    if (length == null) {
+      this.length = getObjectMetadata().contentLength();
+    }
+
+    return length;
   }
 
   @Override
   public SeekableInputStream newStream() {
-    return new S3InputStream(client(), uri(), awsProperties());
+    return new S3InputStream(client(), uri(), s3FileIOProperties(), metrics());
   }
 
+  @Override
+  public NativeFileCryptoParameters nativeCryptoParameters() {
+    return nativeDecryptionParameters;
+  }
+
+  @Override
+  public void setNativeCryptoParameters(NativeFileCryptoParameters nativeCryptoParameters) {
+    this.nativeDecryptionParameters = nativeCryptoParameters;
+  }
 }

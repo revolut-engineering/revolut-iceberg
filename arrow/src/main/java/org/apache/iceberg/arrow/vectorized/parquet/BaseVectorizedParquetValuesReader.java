@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.arrow.vectorized.parquet;
 
 import java.io.IOException;
@@ -30,13 +29,13 @@ import org.apache.parquet.column.values.bitpacking.Packer;
 import org.apache.parquet.io.ParquetDecodingException;
 
 /**
- * A values reader for Parquet's run-length encoded data that reads column data in batches instead of one value at a
- * time. This is based off of the VectorizedRleValuesReader class in Apache Spark with these changes:
- * <p>
- * Writes batches of values retrieved to Arrow vectors. If all pages of a column within the row group
- * are not dictionary encoded, then dictionary ids are eagerly decoded into actual values before
- * writing them to the Arrow vectors
- * </p>
+ * A values reader for Parquet's run-length encoded data that reads column data in batches instead
+ * of one value at a time. This is based off of the VectorizedRleValuesReader class in Apache Spark
+ * with these changes:
+ *
+ * <p>Writes batches of values retrieved to Arrow vectors. If all pages of a column within the row
+ * group are not dictionary encoded, then dictionary ids are eagerly decoded into actual values
+ * before writing them to the Arrow vectors
  */
 @SuppressWarnings("checkstyle:VisibilityModifier")
 public class BaseVectorizedParquetValuesReader extends ValuesReader {
@@ -81,11 +80,14 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
   }
 
   public BaseVectorizedParquetValuesReader(
-      int bitWidth,
-      int maxDefLevel,
-      boolean setValidityVector) {
+      int bitWidth, int maxDefLevel, boolean setValidityVector) {
+    this(bitWidth, maxDefLevel, bitWidth != 0, setValidityVector);
+  }
+
+  public BaseVectorizedParquetValuesReader(
+      int bitWidth, int maxDefLevel, boolean readLength, boolean setValidityVector) {
     this.fixedWidth = true;
-    this.readLength = bitWidth != 0;
+    this.readLength = readLength;
     this.maxDefLevel = maxDefLevel;
     this.setArrowValidityVector = setValidityVector;
     init(bitWidth);
@@ -116,9 +118,7 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
     }
   }
 
-  /**
-   * Initializes the internal state for decoding ints of `bitWidth`.
-   */
+  /** Initializes the internal state for decoding ints of `bitWidth`. */
   private void init(int bw) {
     Preconditions.checkArgument(bw >= 0 && bw <= 32, "bitWidth must be >= 0 and <= 32");
     this.bitWidth = bw;
@@ -126,9 +126,7 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
     this.packer = Packer.LITTLE_ENDIAN.newBytePacker(bw);
   }
 
-  /**
-   * Reads the next varint encoded int.
-   */
+  /** Reads the next varint encoded int. */
   private int readUnsignedVarInt() throws IOException {
     int value = 0;
     int shift = 0;
@@ -141,9 +139,7 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
     return value;
   }
 
-  /**
-   * Reads the next 4 byte little endian int.
-   */
+  /** Reads the next 4 byte little endian int. */
   private int readIntLittleEndian() throws IOException {
     int ch4 = inputStream.read();
     int ch3 = inputStream.read();
@@ -152,36 +148,35 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
     return (ch1 << 24) + (ch2 << 16) + (ch3 << 8) + (ch4 << 0);
   }
 
-  /**
-   * Reads the next byteWidth little endian int.
-   */
+  /** Reads the next byteWidth little endian int. */
   private int readIntLittleEndianPaddedOnBitWidth() throws IOException {
     switch (bytesWidth) {
       case 0:
         return 0;
       case 1:
         return inputStream.read();
-      case 2: {
-        int ch2 = inputStream.read();
-        int ch1 = inputStream.read();
-        return (ch1 << 8) + ch2;
-      }
-      case 3: {
-        int ch3 = inputStream.read();
-        int ch2 = inputStream.read();
-        int ch1 = inputStream.read();
-        return (ch1 << 16) + (ch2 << 8) + (ch3 << 0);
-      }
-      case 4: {
-        return readIntLittleEndian();
-      }
+      case 2:
+        {
+          int ch2 = inputStream.read();
+          int ch1 = inputStream.read();
+          return (ch1 << 8) + ch2;
+        }
+      case 3:
+        {
+          int ch3 = inputStream.read();
+          int ch2 = inputStream.read();
+          int ch1 = inputStream.read();
+          return (ch1 << 16) + (ch2 << 8) + (ch3 << 0);
+        }
+      case 4:
+        {
+          return readIntLittleEndian();
+        }
     }
     throw new RuntimeException("Non-supported bytesWidth: " + bytesWidth);
   }
 
-  /**
-   * Reads the next group.
-   */
+  /** Reads the next group. */
   void readNextGroup() {
     try {
       int header = readUnsignedVarInt();
@@ -202,7 +197,8 @@ public class BaseVectorizedParquetValuesReader extends ValuesReader {
           while (valueIndex < this.currentCount) {
             // values are bit packed 8 at a time, so reading bitWidth will always work
             ByteBuffer buffer = inputStream.slice(bitWidth);
-            this.packer.unpack8Values(buffer, buffer.position(), this.packedValuesBuffer, valueIndex);
+            this.packer.unpack8Values(
+                buffer, buffer.position(), this.packedValuesBuffer, valueIndex);
             valueIndex += 8;
           }
           return;

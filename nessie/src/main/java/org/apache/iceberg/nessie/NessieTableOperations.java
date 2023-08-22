@@ -16,95 +16,183 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.nessie;
 
-import com.dremio.nessie.client.NessieClient;
-import com.dremio.nessie.error.NessieConflictException;
-import com.dremio.nessie.error.NessieNotFoundException;
-import com.dremio.nessie.model.Contents;
-import com.dremio.nessie.model.ContentsKey;
-import com.dremio.nessie.model.IcebergTable;
-import com.dremio.nessie.model.ImmutableIcebergTable;
+import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.BaseMetastoreTableOperations;
-import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.TableMetadata;
+import org.apache.iceberg.TableMetadataParser;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.CommitFailedException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
+import org.apache.iceberg.exceptions.NoSuchNamespaceException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.io.FileIO;
+import org.projectnessie.client.http.HttpClientException;
+import org.projectnessie.error.NessieConflictException;
+import org.projectnessie.error.NessieNotFoundException;
+import org.projectnessie.error.NessieReferenceConflictException;
+import org.projectnessie.error.ReferenceConflicts;
+import org.projectnessie.model.Conflict;
+import org.projectnessie.model.Conflict.ConflictType;
+import org.projectnessie.model.Content;
+import org.projectnessie.model.ContentKey;
+import org.projectnessie.model.IcebergTable;
+import org.projectnessie.model.Reference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * Nessie implementation of Iceberg TableOperations.
- */
+/** Nessie implementation of Iceberg TableOperations. */
 public class NessieTableOperations extends BaseMetastoreTableOperations {
 
-  private final NessieClient client;
-  private final ContentsKey key;
-  private UpdateableReference reference;
-  private IcebergTable table;
-  private FileIO fileIO;
+  private static final Logger LOG = LoggerFactory.getLogger(NessieTableOperations.class);
 
   /**
-   * Create a nessie table operations given a table identifier.
+   * Name of the `{@link TableMetadata} property that holds the Nessie commit-ID from which the
+   * metadata has been loaded.
    */
-  public NessieTableOperations(
-      ContentsKey key,
-      UpdateableReference reference,
-      NessieClient client,
-      FileIO fileIO) {
+  public static final String NESSIE_COMMIT_ID_PROPERTY = "nessie.commit.id";
+
+  private final NessieIcebergClient client;
+  private final ContentKey key;
+  private IcebergTable table;
+  private final FileIO fileIO;
+  private final Map<String, String> catalogOptions;
+
+  /** Create a nessie table operations given a table identifier. */
+  NessieTableOperations(
+      ContentKey key,
+      NessieIcebergClient client,
+      FileIO fileIO,
+      Map<String, String> catalogOptions) {
     this.key = key;
-    this.reference = reference;
     this.client = client;
     this.fileIO = fileIO;
+    this.catalogOptions = catalogOptions;
+  }
+
+  @Override
+  protected String tableName() {
+    return key.toString();
   }
 
   @Override
   protected void doRefresh() {
     try {
-      reference.refresh();
+      client.refresh();
     } catch (NessieNotFoundException e) {
-      throw new RuntimeException("Failed to refresh as ref is no longer valid.", e);
+      throw new RuntimeException(
+          String.format(
+              "Failed to refresh as ref '%s' " + "is no longer valid.", client.getRef().getName()),
+          e);
     }
     String metadataLocation = null;
+    Reference reference = client.getRef().getReference();
     try {
-      Contents contents = client.getContentsApi().getContents(key, reference.getHash());
-      this.table = contents.unwrap(IcebergTable.class)
-          .orElseThrow(() ->
-              new IllegalStateException("Cannot refresh iceberg table: " +
-                  String.format("Nessie points to a non-Iceberg object for path: %s.", key)));
-      metadataLocation = table.getMetadataLocation();
+      Content content = client.getApi().getContent().key(key).reference(reference).get().get(key);
+      LOG.debug("Content '{}' at '{}': {}", key, reference, content);
+      if (content == null) {
+        if (currentMetadataLocation() != null) {
+          throw new NoSuchTableException("No such table '%s' in '%s'", key, reference);
+        }
+      } else {
+        this.table =
+            content
+                .unwrap(IcebergTable.class)
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException(
+                            String.format(
+                                "Cannot refresh iceberg table: "
+                                    + "Nessie points to a non-Iceberg object for path: %s.",
+                                key)));
+        metadataLocation = table.getMetadataLocation();
+      }
     } catch (NessieNotFoundException ex) {
       if (currentMetadataLocation() != null) {
-        throw new NoSuchTableException(ex, "No such table %s", key);
+        throw new NoSuchTableException(ex, "No such table '%s'", key);
       }
     }
-    refreshFromMetadataLocation(metadataLocation, 2);
+    refreshFromMetadataLocation(
+        metadataLocation,
+        null,
+        2,
+        location ->
+            NessieUtil.updateTableMetadataWithNessieSpecificProperties(
+                TableMetadataParser.read(fileIO, location),
+                location,
+                table,
+                key.toString(),
+                reference));
   }
 
   @Override
   protected void doCommit(TableMetadata base, TableMetadata metadata) {
-    reference.checkMutable();
+    boolean newTable = base == null;
+    String newMetadataLocation = writeNewMetadataIfRequired(newTable, metadata);
 
-    String newMetadataLocation = writeNewMetadata(metadata, currentVersion() + 1);
-
-    boolean threw = true;
+    String refName = client.refName();
+    boolean delete = true;
     try {
-      IcebergTable newTable = ImmutableIcebergTable.builder().metadataLocation(newMetadataLocation).build();
-      client.getContentsApi().setContents(key,
-                                          reference.getAsBranch().getName(),
-                                          reference.getHash(),
-                                          String.format("iceberg commit%s", applicationId()),
-                                          newTable);
-      threw = false;
+      client.commitTable(base, metadata, newMetadataLocation, table, key);
+      delete = false;
     } catch (NessieConflictException ex) {
-      throw new CommitFailedException(ex, "Commit failed: Reference hash is out of date. " +
-          "Update the reference %s and try again", reference.getName());
+      if (ex instanceof NessieReferenceConflictException) {
+        // Throws a specialized exception, if possible
+        maybeThrowSpecializedException((NessieReferenceConflictException) ex);
+      }
+      throw new CommitFailedException(
+          ex,
+          "Cannot commit: Reference hash is out of date. "
+              + "Update the reference '%s' and try again",
+          refName);
+    } catch (HttpClientException ex) {
+      // Intentionally catch all nessie-client-exceptions here and not just the "timeout" variant
+      // to catch all kinds of network errors (e.g. connection reset). Network code implementation
+      // details and all kinds of network devices can induce unexpected behavior. So better be
+      // safe than sorry.
+      delete = false;
+      throw new CommitStateUnknownException(ex);
     } catch (NessieNotFoundException ex) {
-      throw new RuntimeException(String.format("Commit failed: Reference %s no longer exist", reference.getName()), ex);
+      throw new RuntimeException(
+          String.format("Cannot commit: Reference '%s' no longer exists", refName), ex);
     } finally {
-      if (threw) {
+      if (delete) {
         io().deleteFile(newMetadataLocation);
+      }
+    }
+  }
+
+  private static void maybeThrowSpecializedException(NessieReferenceConflictException ex) {
+    // Check if the server returned 'ReferenceConflicts' information
+    ReferenceConflicts referenceConflicts = ex.getErrorDetails();
+    if (referenceConflicts == null) {
+      return;
+    }
+
+    // Can only narrow down to a single exception, if there is only one conflict.
+    List<Conflict> conflicts = referenceConflicts.conflicts();
+    if (conflicts.size() != 1) {
+      return;
+    }
+
+    Conflict conflict = conflicts.get(0);
+    ConflictType conflictType = conflict.conflictType();
+    if (conflictType != null) {
+      switch (conflictType) {
+        case NAMESPACE_ABSENT:
+          throw new NoSuchNamespaceException(ex, "Namespace does not exist: %s", conflict.key());
+        case NAMESPACE_NOT_EMPTY:
+          throw new NamespaceNotEmptyException(ex, "Namespace not empty: %s", conflict.key());
+        case KEY_DOES_NOT_EXIST:
+          throw new NoSuchTableException(ex, "Table or view does not exist: %s", conflict.key());
+        case KEY_EXISTS:
+          throw new AlreadyExistsException(ex, "Table or view already exists: %s", conflict.key());
+        default:
+          // Explicit fall-through
+          break;
       }
     }
   }
@@ -113,27 +201,4 @@ public class NessieTableOperations extends BaseMetastoreTableOperations {
   public FileIO io() {
     return fileIO;
   }
-
-  /**
-   * try and get a Spark application id if one exists.
-   *
-   * <p>
-   *   We haven't figured out a general way to pass commit messages through to the Nessie committer yet.
-   *   This is hacky but gets the job done until we can have a more complete commit/audit log.
-   * </p>
-   */
-  private String applicationId() {
-    String appId = null;
-    TableMetadata current = current();
-    if (current != null) {
-      Snapshot snapshot = current.currentSnapshot();
-      if (snapshot != null) {
-        Map<String, String> summary = snapshot.summary();
-        appId = summary.get("spark.app.id");
-      }
-
-    }
-    return appId == null ? "" : ("\nspark.app.id= " + appId);
-  }
-
 }

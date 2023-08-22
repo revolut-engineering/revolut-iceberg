@@ -16,43 +16,62 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.io;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.encryption.EncryptionKeyMetadata;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
-public class DataWriter<T> implements Closeable {
+public class DataWriter<T> implements FileWriter<T, DataWriteResult> {
   private final FileAppender<T> appender;
   private final FileFormat format;
   private final String location;
   private final PartitionSpec spec;
   private final StructLike partition;
   private final ByteBuffer keyMetadata;
+  private final SortOrder sortOrder;
   private DataFile dataFile = null;
 
-  public DataWriter(FileAppender<T> appender, FileFormat format, String location,
-                    PartitionSpec spec, StructLike partition, EncryptionKeyMetadata keyMetadata) {
+  public DataWriter(
+      FileAppender<T> appender,
+      FileFormat format,
+      String location,
+      PartitionSpec spec,
+      StructLike partition,
+      EncryptionKeyMetadata keyMetadata) {
+    this(appender, format, location, spec, partition, keyMetadata, null);
+  }
+
+  public DataWriter(
+      FileAppender<T> appender,
+      FileFormat format,
+      String location,
+      PartitionSpec spec,
+      StructLike partition,
+      EncryptionKeyMetadata keyMetadata,
+      SortOrder sortOrder) {
     this.appender = appender;
     this.format = format;
     this.location = location;
     this.spec = spec;
     this.partition = partition;
     this.keyMetadata = keyMetadata != null ? keyMetadata.buffer() : null;
+    this.sortOrder = sortOrder;
   }
 
-  public void add(T row) {
+  @Override
+  public void write(T row) {
     appender.add(row);
   }
 
+  @Override
   public long length() {
     return appender.length();
   }
@@ -61,20 +80,27 @@ public class DataWriter<T> implements Closeable {
   public void close() throws IOException {
     if (dataFile == null) {
       appender.close();
-      this.dataFile = DataFiles.builder(spec)
-          .withFormat(format)
-          .withPath(location)
-          .withPartition(partition)
-          .withEncryptionKeyMetadata(keyMetadata)
-          .withFileSizeInBytes(appender.length())
-          .withMetrics(appender.metrics())
-          .withSplitOffsets(appender.splitOffsets())
-          .build();
+      this.dataFile =
+          DataFiles.builder(spec)
+              .withFormat(format)
+              .withPath(location)
+              .withPartition(partition)
+              .withEncryptionKeyMetadata(keyMetadata)
+              .withFileSizeInBytes(appender.length())
+              .withMetrics(appender.metrics())
+              .withSplitOffsets(appender.splitOffsets())
+              .withSortOrder(sortOrder)
+              .build();
     }
   }
 
   public DataFile toDataFile() {
     Preconditions.checkState(dataFile != null, "Cannot create data file from unclosed writer");
     return dataFile;
+  }
+
+  @Override
+  public DataWriteResult result() {
+    return new DataWriteResult(toDataFile());
   }
 }

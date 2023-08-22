@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.data;
 
 import java.io.File;
@@ -26,6 +25,7 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TestTables;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
 import org.apache.iceberg.util.StructLikeSet;
 import org.junit.Assert;
 
@@ -48,7 +48,10 @@ public class TestGenericReaderDeletes extends DeleteReadTests {
   public StructLikeSet rowSet(String name, Table table, String... columns) throws IOException {
     StructLikeSet set = StructLikeSet.create(table.schema().asStruct());
     try (CloseableIterable<Record> reader = IcebergGenerics.read(table).select(columns).build()) {
-      reader.forEach(set::add);
+      Iterables.addAll(
+          set,
+          CloseableIterable.transform(
+              reader, record -> new InternalRecordWrapper(table.schema().asStruct()).wrap(record)));
     }
     return set;
   }

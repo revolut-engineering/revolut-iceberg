@@ -16,18 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.data;
 
+import java.util.Collection;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableScan;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
-import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 
 public class IcebergGenerics {
-  private IcebergGenerics() {
-  }
+  private IcebergGenerics() {}
 
   /**
    * Returns a builder to configure a read of the given table that produces generic records.
@@ -63,7 +62,17 @@ public class IcebergGenerics {
     }
 
     public ScanBuilder select(String... selectedColumns) {
-      this.tableScan = tableScan.select(ImmutableList.copyOf(selectedColumns));
+      this.tableScan = tableScan.select(selectedColumns);
+      return this;
+    }
+
+    public ScanBuilder select(Collection<String> columns) {
+      this.tableScan = tableScan.select(columns);
+      return this;
+    }
+
+    public ScanBuilder project(Schema schema) {
+      this.tableScan = tableScan.project(schema);
       return this;
     }
 
@@ -88,10 +97,7 @@ public class IcebergGenerics {
     }
 
     public CloseableIterable<Record> build() {
-      return new TableScanIterable(
-          tableScan,
-          reuseContainers
-      );
+      return new TableScanIterable(tableScan, reuseContainers);
     }
   }
 }

@@ -16,12 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.iceberg.encryption.EncryptedOutputFile;
@@ -29,20 +27,23 @@ import org.apache.iceberg.encryption.EncryptionKeyMetadata;
 import org.apache.iceberg.hadoop.HadoopInputFile;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
-import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.types.Conversions;
+import org.apache.iceberg.util.ArrayUtil;
 import org.apache.iceberg.util.ByteBuffers;
 
 public class DataFiles {
 
-  private DataFiles() {
-  }
+  private DataFiles() {}
 
   static PartitionData newPartitionData(PartitionSpec spec) {
     return new PartitionData(spec.partitionType());
   }
 
-  static PartitionData copyPartitionData(PartitionSpec spec, StructLike partitionData, PartitionData reuse) {
+  static PartitionData copyPartitionData(
+      PartitionSpec spec, StructLike partitionData, PartitionData reuse) {
+    Preconditions.checkArgument(
+        spec.isPartitioned(), "Can't copy partition data to a unpartitioned table");
     PartitionData data = reuse;
     if (data == null) {
       data = newPartitionData(spec);
@@ -64,24 +65,46 @@ public class DataFiles {
     }
 
     String[] partitions = partitionPath.split("/", -1);
-    Preconditions.checkArgument(partitions.length <= spec.fields().size(),
+    Preconditions.checkArgument(
+        partitions.length <= spec.fields().size(),
         "Invalid partition data, too many fields (expecting %s): %s",
-        spec.fields().size(), partitionPath);
-    Preconditions.checkArgument(partitions.length >= spec.fields().size(),
+        spec.fields().size(),
+        partitionPath);
+    Preconditions.checkArgument(
+        partitions.length >= spec.fields().size(),
         "Invalid partition data, not enough fields (expecting %s): %s",
-        spec.fields().size(), partitionPath);
+        spec.fields().size(),
+        partitionPath);
 
     for (int i = 0; i < partitions.length; i += 1) {
       PartitionField field = spec.fields().get(i);
       String[] parts = partitions[i].split("=", 2);
       Preconditions.checkArgument(
-          parts.length == 2 &&
-              parts[0] != null &&
-              field.name().equals(parts[0]),
+          parts.length == 2 && parts[0] != null && field.name().equals(parts[0]),
           "Invalid partition: %s",
           partitions[i]);
 
       data.set(i, Conversions.fromPartitionString(data.getType(i), parts[1]));
+    }
+
+    return data;
+  }
+
+  static PartitionData fillFromValues(
+      PartitionSpec spec, List<String> partitionValues, PartitionData reuse) {
+    PartitionData data = reuse;
+    if (data == null) {
+      data = newPartitionData(spec);
+    }
+
+    Preconditions.checkArgument(
+        partitionValues.size() == spec.fields().size(),
+        "Invalid partition data, expecting %s fields, found %s",
+        spec.fields().size(),
+        partitionValues.size());
+
+    for (int i = 0; i < partitionValues.size(); i += 1) {
+      data.set(i, Conversions.fromPartitionString(data.getType(i), partitionValues.get(i)));
     }
 
     return data;
@@ -121,7 +144,6 @@ public class DataFiles {
     private FileFormat format = null;
     private long recordCount = -1L;
     private long fileSizeInBytes = -1L;
-    private int sortOrderId = SortOrder.unsorted().orderId();
 
     // optional fields
     private Map<Integer, Long> columnSizes = null;
@@ -132,11 +154,13 @@ public class DataFiles {
     private Map<Integer, ByteBuffer> upperBounds = null;
     private ByteBuffer keyMetadata = null;
     private List<Long> splitOffsets = null;
+    private List<Integer> equalityFieldIds = null;
+    private Integer sortOrderId = SortOrder.unsorted().orderId();
 
     public Builder(PartitionSpec spec) {
       this.spec = spec;
       this.specId = spec.specId();
-      this.isPartitioned = spec.fields().size() > 0;
+      this.isPartitioned = spec.isPartitioned();
       this.partitionData = isPartitioned ? newPartitionData(spec) : null;
     }
 
@@ -160,7 +184,8 @@ public class DataFiles {
 
     public Builder copy(DataFile toCopy) {
       if (isPartitioned) {
-        Preconditions.checkState(specId == toCopy.specId(), "Cannot copy a DataFile with a different spec");
+        Preconditions.checkState(
+            specId == toCopy.specId(), "Cannot copy a DataFile with a different spec");
         this.partitionData = copyPartitionData(spec, toCopy.partition(), partitionData);
       }
       this.filePath = toCopy.path().toString();
@@ -173,9 +198,10 @@ public class DataFiles {
       this.nanValueCounts = toCopy.nanValueCounts();
       this.lowerBounds = toCopy.lowerBounds();
       this.upperBounds = toCopy.upperBounds();
-      this.keyMetadata = toCopy.keyMetadata() == null ? null
-          : ByteBuffers.copy(toCopy.keyMetadata());
-      this.splitOffsets = toCopy.splitOffsets() == null ? null : copyList(toCopy.splitOffsets());
+      this.keyMetadata =
+          toCopy.keyMetadata() == null ? null : ByteBuffers.copy(toCopy.keyMetadata());
+      this.splitOffsets =
+          toCopy.splitOffsets() == null ? null : ImmutableList.copyOf(toCopy.splitOffsets());
       this.sortOrderId = toCopy.sortOrderId();
       return this;
     }
@@ -208,7 +234,7 @@ public class DataFiles {
     }
 
     public Builder withFormat(String newFormat) {
-      this.format = FileFormat.valueOf(newFormat.toUpperCase(Locale.ENGLISH));
+      this.format = FileFormat.fromString(newFormat);
       return this;
     }
 
@@ -218,7 +244,9 @@ public class DataFiles {
     }
 
     public Builder withPartition(StructLike newPartition) {
-      this.partitionData = copyPartitionData(spec, newPartition, partitionData);
+      if (isPartitioned) {
+        this.partitionData = copyPartitionData(spec, newPartition, partitionData);
+      }
       return this;
     }
 
@@ -233,10 +261,21 @@ public class DataFiles {
     }
 
     public Builder withPartitionPath(String newPartitionPath) {
-      Preconditions.checkArgument(isPartitioned || newPartitionPath.isEmpty(),
+      Preconditions.checkArgument(
+          isPartitioned || newPartitionPath.isEmpty(),
           "Cannot add partition data for an unpartitioned table");
       if (!newPartitionPath.isEmpty()) {
         this.partitionData = fillFromPath(spec, newPartitionPath, partitionData);
+      }
+      return this;
+    }
+
+    public Builder withPartitionValues(List<String> partitionValues) {
+      Preconditions.checkArgument(
+          isPartitioned ^ partitionValues.isEmpty(),
+          "Table must be partitioned or partition values must be empty");
+      if (!partitionValues.isEmpty()) {
+        this.partitionData = fillFromValues(spec, partitionValues, partitionData);
       }
       return this;
     }
@@ -255,10 +294,18 @@ public class DataFiles {
 
     public Builder withSplitOffsets(List<Long> offsets) {
       if (offsets != null) {
-        this.splitOffsets = copyList(offsets);
+        this.splitOffsets = ImmutableList.copyOf(offsets);
       } else {
         this.splitOffsets = null;
       }
+      return this;
+    }
+
+    public Builder withEqualityFieldIds(List<Integer> equalityIds) {
+      if (equalityIds != null) {
+        this.equalityFieldIds = ImmutableList.copyOf(equalityIds);
+      }
+
       return this;
     }
 
@@ -288,16 +335,23 @@ public class DataFiles {
       Preconditions.checkArgument(recordCount >= 0, "Record count is required");
 
       return new GenericDataFile(
-          specId, filePath, format, isPartitioned ? partitionData.copy() : null,
-          fileSizeInBytes, new Metrics(
-              recordCount, columnSizes, valueCounts, nullValueCounts, nanValueCounts, lowerBounds, upperBounds),
-          keyMetadata, splitOffsets, sortOrderId);
+          specId,
+          filePath,
+          format,
+          isPartitioned ? partitionData.copy() : null,
+          fileSizeInBytes,
+          new Metrics(
+              recordCount,
+              columnSizes,
+              valueCounts,
+              nullValueCounts,
+              nanValueCounts,
+              lowerBounds,
+              upperBounds),
+          keyMetadata,
+          splitOffsets,
+          ArrayUtil.toIntArray(equalityFieldIds),
+          sortOrderId);
     }
-  }
-
-  private static <E> List<E> copyList(List<E> toCopy) {
-    List<E> copy = Lists.newArrayListWithExpectedSize(toCopy.size());
-    copy.addAll(toCopy);
-    return copy;
   }
 }

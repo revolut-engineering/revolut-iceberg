@@ -16,11 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.events;
 
-import org.junit.Assert;
-import org.junit.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.junit.jupiter.api.Test;
 
 public class TestListeners {
   static {
@@ -28,11 +28,9 @@ public class TestListeners {
     Listeners.register(TestListener.get()::event2, Event2.class);
   }
 
-  public static class Event1 {
-  }
+  public static class Event1 {}
 
-  public static class Event2 {
-  }
+  public static class Event2 {}
 
   public static class TestListener {
     private static final TestListener INSTANCE = new TestListener();
@@ -59,7 +57,7 @@ public class TestListeners {
 
     Listeners.notifyAll(e1);
 
-    Assert.assertEquals(e1, TestListener.get().e1);
+    assertThat(TestListener.get().e1).isEqualTo(e1);
   }
 
   @Test
@@ -68,7 +66,7 @@ public class TestListeners {
 
     Listeners.notifyAll(e2);
 
-    Assert.assertEquals(e2, TestListener.get().e2);
+    assertThat(TestListener.get().e2).isEqualTo(e2);
   }
 
   @Test
@@ -80,7 +78,7 @@ public class TestListeners {
 
     Listeners.notifyAll(e1);
 
-    Assert.assertEquals(e1, TestListener.get().e1);
-    Assert.assertEquals(e1, other.e1);
+    assertThat(TestListener.get().e1).isEqualTo(e1);
+    assertThat(other.e1).isEqualTo(e1);
   }
 }

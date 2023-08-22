@@ -16,17 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.arrow.vectorized;
 
 import java.util.Arrays;
 
 /**
- * Instances of this class simply track whether a value at an index is null.
- * For simplicity and performance, it is expected that various setter methods
- * {@link #setNull(int)}, {@link #setNulls(int, int)}, {@link #setNotNull(int)}
- * and {@link #setNotNulls(int, int)} are invoked with monotonically
- * increasing values for the index parameter.
+ * Instances of this class simply track whether a value at an index is null. For simplicity and
+ * performance, it is expected that various setter methods {@link #setNull(int)}, {@link
+ * #setNulls(int, int)}, {@link #setNotNull(int)} and {@link #setNotNulls(int, int)} are invoked
+ * with monotonically increasing values for the index parameter.
  */
 public class NullabilityHolder {
   private final byte[] isNull;
@@ -42,6 +40,10 @@ public class NullabilityHolder {
     Arrays.fill(nulls, (byte) 1);
   }
 
+  public int size() {
+    return isNull.length;
+  }
+
   public void setNull(int index) {
     isNull[index] = 1;
     numNulls++;
@@ -53,15 +55,14 @@ public class NullabilityHolder {
 
   public void setNulls(int startIndex, int num) {
     System.arraycopy(nulls, 0, isNull, startIndex, num);
+    numNulls += num;
   }
 
   public void setNotNulls(int startIndex, int num) {
     System.arraycopy(nonNulls, 0, isNull, startIndex, num);
   }
 
-  /**
-   * Returns 1 if null, 0 otherwise.
-   */
+  /** Returns 1 if null, 0 otherwise. */
   public byte isNullAt(int index) {
     return isNull[index];
   }

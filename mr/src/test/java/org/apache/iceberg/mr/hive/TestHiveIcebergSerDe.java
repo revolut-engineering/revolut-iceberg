@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.mr.hive;
+
+import static org.apache.iceberg.types.Types.NestedField.required;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,6 +29,8 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.data.RandomGenericData;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.mr.Catalogs;
+import org.apache.iceberg.mr.InputFormatConfig;
 import org.apache.iceberg.mr.hive.serde.objectinspector.IcebergObjectInspector;
 import org.apache.iceberg.mr.mapred.Container;
 import org.apache.iceberg.types.Types;
@@ -36,14 +39,12 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import static org.apache.iceberg.types.Types.NestedField.required;
-
 public class TestHiveIcebergSerDe {
 
-  private static final Schema schema = new Schema(required(1, "string_field", Types.StringType.get()));
+  private static final Schema schema =
+      new Schema(required(1, "string_field", Types.StringType.get()));
 
-  @Rule
-  public TemporaryFolder tmp = new TemporaryFolder();
+  @Rule public TemporaryFolder tmp = new TemporaryFolder();
 
   @Test
   public void testInitialize() throws IOException, SerDeException {
@@ -54,6 +55,7 @@ public class TestHiveIcebergSerDe {
 
     Properties properties = new Properties();
     properties.setProperty("location", location.toString());
+    properties.setProperty(InputFormatConfig.CATALOG_NAME, Catalogs.ICEBERG_HADOOP_TABLE_NAME);
 
     HadoopTables tables = new HadoopTables(conf);
     tables.create(schema, location.toString());
@@ -74,5 +76,4 @@ public class TestHiveIcebergSerDe {
 
     Assert.assertEquals(record, serDe.deserialize(container));
   }
-
 }

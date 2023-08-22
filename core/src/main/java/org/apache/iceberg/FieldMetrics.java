@@ -16,29 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
-
-import java.nio.ByteBuffer;
-
-/**
- * Iceberg internally tracked field level metrics.
- */
-public class FieldMetrics {
+/** Iceberg internally tracked field level metrics. */
+public class FieldMetrics<T> {
   private final int id;
   private final long valueCount;
   private final long nullValueCount;
   private final long nanValueCount;
-  private final ByteBuffer lowerBound;
-  private final ByteBuffer upperBound;
+  private final T lowerBound;
+  private final T upperBound;
 
-  public FieldMetrics(int id,
-                      long valueCount,
-                      long nullValueCount,
-                      long nanValueCount,
-                      ByteBuffer lowerBound,
-                      ByteBuffer upperBound) {
+  public FieldMetrics(
+      int id,
+      long valueCount,
+      long nullValueCount,
+      long nanValueCount,
+      T lowerBound,
+      T upperBound) {
     this.id = id;
     this.valueCount = valueCount;
     this.nullValueCount = nullValueCount;
@@ -47,45 +42,41 @@ public class FieldMetrics {
     this.upperBound = upperBound;
   }
 
-  /**
-   * Returns the id of the field that the metrics within this class are associated with.
-   */
+  /** Returns the id of the field that the metrics within this class are associated with. */
   public int id() {
     return id;
   }
 
-  /**
-   * Returns the number of all values, including nulls, NaN and repeated, for the given field.
-   */
+  /** Returns the number of all values, including nulls, NaN and repeated, for the given field. */
   public long valueCount() {
     return valueCount;
   }
 
-  /**
-   * Returns the number of null values for this field.
-   */
+  /** Returns the number of null values for this field. */
   public long nullValueCount() {
     return nullValueCount;
   }
 
   /**
-   * Returns the number of NaN values for this field. Will only be non-0 if this field is a double or float field.
+   * Returns the number of NaN values for this field. Will only be non-0 if this field is a double
+   * or float field.
    */
   public long nanValueCount() {
     return nanValueCount;
   }
 
-  /**
-   * Returns the lower bound value of this field.
-   */
-  public ByteBuffer lowerBound() {
+  /** Returns the lower bound value of this field. */
+  public T lowerBound() {
     return lowerBound;
   }
 
-  /**
-   * Returns the upper bound value of this field.
-   */
-  public ByteBuffer upperBound() {
+  /** Returns the upper bound value of this field. */
+  public T upperBound() {
     return upperBound;
+  }
+
+  /** Returns if the metrics has bounds (i.e. there is at least non-null value for this field) */
+  public boolean hasBounds() {
+    return upperBound != null;
   }
 }

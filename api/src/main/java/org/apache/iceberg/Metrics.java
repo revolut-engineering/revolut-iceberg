@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.io.IOException;
@@ -24,13 +23,11 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
 import java.util.Map;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.util.ByteBuffers;
 
-/**
- * Iceberg file format metrics.
- */
+/** Iceberg file format metrics. */
 public class Metrics implements Serializable {
 
   private Long rowCount = null;
@@ -41,28 +38,14 @@ public class Metrics implements Serializable {
   private Map<Integer, ByteBuffer> lowerBounds = null;
   private Map<Integer, ByteBuffer> upperBounds = null;
 
-  public Metrics() {
-  }
+  public Metrics() {}
 
-  /**
-   * @deprecated will be removed in 0.12.0; use {@link #Metrics(Long, Map, Map, Map, Map)} instead.
-   */
-  @Deprecated
-  public Metrics(Long rowCount,
-                 Map<Integer, Long> columnSizes,
-                 Map<Integer, Long> valueCounts,
-                 Map<Integer, Long> nullValueCounts) {
-    this.rowCount = rowCount;
-    this.columnSizes = columnSizes;
-    this.valueCounts = valueCounts;
-    this.nullValueCounts = nullValueCounts;
-  }
-
-  public Metrics(Long rowCount,
-                 Map<Integer, Long> columnSizes,
-                 Map<Integer, Long> valueCounts,
-                 Map<Integer, Long> nullValueCounts,
-                 Map<Integer, Long> nanValueCounts) {
+  public Metrics(
+      Long rowCount,
+      Map<Integer, Long> columnSizes,
+      Map<Integer, Long> valueCounts,
+      Map<Integer, Long> nullValueCounts,
+      Map<Integer, Long> nanValueCounts) {
     this.rowCount = rowCount;
     this.columnSizes = columnSizes;
     this.valueCounts = valueCounts;
@@ -70,31 +53,14 @@ public class Metrics implements Serializable {
     this.nanValueCounts = nanValueCounts;
   }
 
-  /**
-   * @deprecated will be removed in 0.12.0; use {@link #Metrics(Long, Map, Map, Map, Map, Map, Map)} instead.
-   */
-  @Deprecated
-  public Metrics(Long rowCount,
-                 Map<Integer, Long> columnSizes,
-                 Map<Integer, Long> valueCounts,
-                 Map<Integer, Long> nullValueCounts,
-                 Map<Integer, ByteBuffer> lowerBounds,
-                 Map<Integer, ByteBuffer> upperBounds) {
-    this.rowCount = rowCount;
-    this.columnSizes = columnSizes;
-    this.valueCounts = valueCounts;
-    this.nullValueCounts = nullValueCounts;
-    this.lowerBounds = lowerBounds;
-    this.upperBounds = upperBounds;
-  }
-
-  public Metrics(Long rowCount,
-                 Map<Integer, Long> columnSizes,
-                 Map<Integer, Long> valueCounts,
-                 Map<Integer, Long> nullValueCounts,
-                 Map<Integer, Long> nanValueCounts,
-                 Map<Integer, ByteBuffer> lowerBounds,
-                 Map<Integer, ByteBuffer> upperBounds) {
+  public Metrics(
+      Long rowCount,
+      Map<Integer, Long> columnSizes,
+      Map<Integer, Long> valueCounts,
+      Map<Integer, Long> nullValueCounts,
+      Map<Integer, Long> nanValueCounts,
+      Map<Integer, ByteBuffer> lowerBounds,
+      Map<Integer, ByteBuffer> upperBounds) {
     this.rowCount = rowCount;
     this.columnSizes = columnSizes;
     this.valueCounts = valueCounts;
@@ -152,12 +118,12 @@ public class Metrics implements Serializable {
   /**
    * Get the non-null lower bound values for all fields in a file.
    *
-   * To convert the {@link ByteBuffer} back to a value, use
-   * {@link org.apache.iceberg.types.Conversions#fromByteBuffer}.
+   * <p>To convert the {@link ByteBuffer} back to a value, use {@link
+   * org.apache.iceberg.types.Conversions#fromByteBuffer}.
    *
    * @return a Map of fieldId to the lower bound value as a ByteBuffer
-   * @see <a href="https://iceberg.apache.org/spec/#appendix-d-single-value-serialization">
-   *   Iceberg Spec - Appendix D: Single-value serialization</a>
+   * @see <a href="https://iceberg.apache.org/spec/#appendix-d-single-value-serialization">Iceberg
+   *     Spec - Appendix D: Single-value serialization</a>
    */
   public Map<Integer, ByteBuffer> lowerBounds() {
     return lowerBounds;
@@ -174,6 +140,7 @@ public class Metrics implements Serializable {
 
   /**
    * Implemented the method to enable serialization of ByteBuffers.
+   *
    * @param out The stream where to write
    * @throws IOException On serialization error
    */
@@ -188,8 +155,8 @@ public class Metrics implements Serializable {
     writeByteBufferMap(out, upperBounds);
   }
 
-  private static void writeByteBufferMap(ObjectOutputStream out, Map<Integer, ByteBuffer> byteBufferMap)
-      throws IOException {
+  private static void writeByteBufferMap(
+      ObjectOutputStream out, Map<Integer, ByteBuffer> byteBufferMap) throws IOException {
     if (byteBufferMap == null) {
       out.writeInt(-1);
 
@@ -207,6 +174,7 @@ public class Metrics implements Serializable {
 
   /**
    * Implemented the method to enable deserialization of ByteBuffers.
+   *
    * @param in The stream to read from
    * @throws IOException On serialization error
    * @throws ClassNotFoundException If the class is not found
@@ -230,7 +198,7 @@ public class Metrics implements Serializable {
       return null;
 
     } else {
-      Map<Integer, ByteBuffer> result = new HashMap<>(size);
+      Map<Integer, ByteBuffer> result = Maps.newHashMapWithExpectedSize(size);
 
       for (int i = 0; i < size; ++i) {
         Integer key = (Integer) in.readObject();

@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.orc;
 
 import java.io.File;
@@ -39,16 +38,24 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.Type;
 import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-/**
- * Test Metrics for ORC.
- */
+/** Test Metrics for ORC. */
+@RunWith(Parameterized.class)
 public class TestOrcMetrics extends TestMetrics {
 
-  static final ImmutableSet<Object> BINARY_TYPES = ImmutableSet.of(Type.TypeID.BINARY,
-      Type.TypeID.FIXED, Type.TypeID.UUID);
+  static final ImmutableSet<Object> BINARY_TYPES =
+      ImmutableSet.of(Type.TypeID.BINARY, Type.TypeID.FIXED, Type.TypeID.UUID);
+
+  @Parameterized.Parameters(name = "formatVersion = {0}")
+  public static Object[] parameters() {
+    return new Object[] {1, 2};
+  }
+
+  public TestOrcMetrics(int formatVersion) {
+    super(formatVersion);
+  }
 
   @Override
   protected OutputFile createOutputFile() throws IOException {
@@ -56,9 +63,6 @@ public class TestOrcMetrics extends TestMetrics {
     String filename = UUID.randomUUID().toString();
     return Files.localOutput(new File(tmpFolder, FileFormat.ORC.addExtension(filename)));
   }
-
-  @Rule
-  public TemporaryFolder temp = new TemporaryFolder();
 
   @Override
   public FileFormat fileFormat() {
@@ -71,23 +75,31 @@ public class TestOrcMetrics extends TestMetrics {
   }
 
   @Override
-  public Metrics getMetrics(Schema schema, MetricsConfig metricsConfig, Record... records) throws IOException {
+  public Metrics getMetrics(Schema schema, MetricsConfig metricsConfig, Record... records)
+      throws IOException {
     return getMetrics(schema, createOutputFile(), ImmutableMap.of(), metricsConfig, records);
   }
 
   @Override
-  protected Metrics getMetricsForRecordsWithSmallRowGroups(Schema schema, OutputFile outputFile, Record... records) {
+  protected Metrics getMetricsForRecordsWithSmallRowGroups(
+      Schema schema, OutputFile outputFile, Record... records) {
     throw new UnsupportedOperationException("supportsSmallRowGroups = " + supportsSmallRowGroups());
   }
 
-  private Metrics getMetrics(Schema schema, OutputFile file, Map<String, String> properties,
-                             MetricsConfig metricsConfig, Record... records) throws IOException {
-    FileAppender<Record> writer = ORC.write(file)
-        .schema(schema)
-        .setAll(properties)
-        .createWriterFunc(GenericOrcWriter::buildWriter)
-        .metricsConfig(metricsConfig)
-        .build();
+  private Metrics getMetrics(
+      Schema schema,
+      OutputFile file,
+      Map<String, String> properties,
+      MetricsConfig metricsConfig,
+      Record... records)
+      throws IOException {
+    FileAppender<Record> writer =
+        ORC.write(file)
+            .schema(schema)
+            .setAll(properties)
+            .createWriterFunc(GenericOrcWriter::buildWriter)
+            .metricsConfig(metricsConfig)
+            .build();
     try (FileAppender<Record> appender = writer) {
       appender.addAll(Lists.newArrayList(records));
     }
@@ -104,11 +116,14 @@ public class TestOrcMetrics extends TestMetrics {
   }
 
   @Override
-  protected <T> void assertBounds(int fieldId, Type type, T lowerBound, T upperBound, Metrics metrics) {
+  protected <T> void assertBounds(
+      int fieldId, Type type, T lowerBound, T upperBound, Metrics metrics) {
     if (isBinaryType(type)) {
-      Assert.assertFalse("ORC binary field should not have lower bounds.",
+      Assert.assertFalse(
+          "ORC binary field should not have lower bounds.",
           metrics.lowerBounds().containsKey(fieldId));
-      Assert.assertFalse("ORC binary field should not have upper bounds.",
+      Assert.assertFalse(
+          "ORC binary field should not have upper bounds.",
           metrics.upperBounds().containsKey(fieldId));
       return;
     }

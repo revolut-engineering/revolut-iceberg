@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.data;
 
 import java.io.IOException;
@@ -42,9 +41,7 @@ import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 
-/**
- * Factory to create a new {@link FileAppender} to write {@link Record}s.
- */
+/** Factory to create a new {@link FileAppender} to write {@link Record}s. */
 public class GenericAppenderFactory implements FileAppenderFactory<Record> {
 
   private final Schema schema;
@@ -62,10 +59,12 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
     this(schema, spec, null, null, null);
   }
 
-  public GenericAppenderFactory(Schema schema, PartitionSpec spec,
-                                int[] equalityFieldIds,
-                                Schema eqDeleteRowSchema,
-                                Schema posDeleteRowSchema) {
+  public GenericAppenderFactory(
+      Schema schema,
+      PartitionSpec spec,
+      int[] equalityFieldIds,
+      Schema eqDeleteRowSchema,
+      Schema posDeleteRowSchema) {
     this.schema = schema;
     this.spec = spec;
     this.equalityFieldIds = equalityFieldIds;
@@ -116,7 +115,8 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
               .build();
 
         default:
-          throw new UnsupportedOperationException("Cannot write unknown file format: " + fileFormat);
+          throw new UnsupportedOperationException(
+              "Cannot write unknown file format: " + fileFormat);
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
@@ -124,19 +124,25 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
   }
 
   @Override
-  public org.apache.iceberg.io.DataWriter<Record> newDataWriter(EncryptedOutputFile file, FileFormat format,
-                                                                StructLike partition) {
+  public org.apache.iceberg.io.DataWriter<Record> newDataWriter(
+      EncryptedOutputFile file, FileFormat format, StructLike partition) {
     return new org.apache.iceberg.io.DataWriter<>(
-        newAppender(file.encryptingOutputFile(), format), format,
-        file.encryptingOutputFile().location(), spec, partition, file.keyMetadata());
+        newAppender(file.encryptingOutputFile(), format),
+        format,
+        file.encryptingOutputFile().location(),
+        spec,
+        partition,
+        file.keyMetadata());
   }
 
   @Override
-  public EqualityDeleteWriter<Record> newEqDeleteWriter(EncryptedOutputFile file, FileFormat format,
-                                                        StructLike partition) {
-    Preconditions.checkState(equalityFieldIds != null && equalityFieldIds.length > 0,
+  public EqualityDeleteWriter<Record> newEqDeleteWriter(
+      EncryptedOutputFile file, FileFormat format, StructLike partition) {
+    Preconditions.checkState(
+        equalityFieldIds != null && equalityFieldIds.length > 0,
         "Equality field ids shouldn't be null or empty when creating equality-delete writer");
-    Preconditions.checkNotNull(eqDeleteRowSchema,
+    Preconditions.checkNotNull(
+        eqDeleteRowSchema,
         "Equality delete row schema shouldn't be null when creating equality-delete writer");
 
     MetricsConfig metricsConfig = MetricsConfig.fromProperties(config);
@@ -148,6 +154,19 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
               .withPartition(partition)
               .overwrite()
               .setAll(config)
+              .rowSchema(eqDeleteRowSchema)
+              .withSpec(spec)
+              .withKeyMetadata(file.keyMetadata())
+              .equalityFieldIds(equalityFieldIds)
+              .buildEqualityWriter();
+
+        case ORC:
+          return ORC.writeDeletes(file.encryptingOutputFile())
+              .createWriterFunc(GenericOrcWriter::buildWriter)
+              .withPartition(partition)
+              .overwrite()
+              .setAll(config)
+              .metricsConfig(metricsConfig)
               .rowSchema(eqDeleteRowSchema)
               .withSpec(spec)
               .withKeyMetadata(file.keyMetadata())
@@ -177,14 +196,25 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
   }
 
   @Override
-  public PositionDeleteWriter<Record> newPosDeleteWriter(EncryptedOutputFile file, FileFormat format,
-                                                         StructLike partition) {
+  public PositionDeleteWriter<Record> newPosDeleteWriter(
+      EncryptedOutputFile file, FileFormat format, StructLike partition) {
     MetricsConfig metricsConfig = MetricsConfig.fromProperties(config);
     try {
       switch (format) {
         case AVRO:
           return Avro.writeDeletes(file.encryptingOutputFile())
               .createWriterFunc(DataWriter::create)
+              .withPartition(partition)
+              .overwrite()
+              .setAll(config)
+              .rowSchema(posDeleteRowSchema)
+              .withSpec(spec)
+              .withKeyMetadata(file.keyMetadata())
+              .buildPositionWriter();
+
+        case ORC:
+          return ORC.writeDeletes(file.encryptingOutputFile())
+              .createWriterFunc(GenericOrcWriter::buildWriter)
               .withPartition(partition)
               .overwrite()
               .setAll(config)
@@ -206,7 +236,8 @@ public class GenericAppenderFactory implements FileAppenderFactory<Record> {
               .buildPositionWriter();
 
         default:
-          throw new UnsupportedOperationException("Cannot write pos-deletes for unsupported file format: " + format);
+          throw new UnsupportedOperationException(
+              "Cannot write pos-deletes for unsupported file format: " + format);
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);

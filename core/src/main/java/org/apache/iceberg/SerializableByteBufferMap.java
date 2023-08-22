@@ -16,13 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg;
 
 import java.io.ObjectStreamException;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -30,6 +30,7 @@ import org.apache.iceberg.util.ByteBuffers;
 
 class SerializableByteBufferMap implements Map<Integer, ByteBuffer>, Serializable {
   private final Map<Integer, ByteBuffer> wrapped;
+  private transient volatile Map<Integer, ByteBuffer> immutableMap;
 
   static Map<Integer, ByteBuffer> wrap(Map<Integer, ByteBuffer> map) {
     if (map == null) {
@@ -55,11 +56,8 @@ class SerializableByteBufferMap implements Map<Integer, ByteBuffer>, Serializabl
     private int[] keys = null;
     private byte[][] values = null;
 
-    /**
-     * Constructor for Java serialization.
-     */
-    MapSerializationProxy() {
-    }
+    /** Constructor for Java serialization. */
+    MapSerializationProxy() {}
 
     MapSerializationProxy(int[] keys, byte[][] values) {
       this.keys = keys;
@@ -90,6 +88,18 @@ class SerializableByteBufferMap implements Map<Integer, ByteBuffer>, Serializabl
     }
 
     return new MapSerializationProxy(keys, values);
+  }
+
+  public Map<Integer, ByteBuffer> immutableMap() {
+    if (immutableMap == null) {
+      synchronized (this) {
+        if (immutableMap == null) {
+          immutableMap = Collections.unmodifiableMap(wrapped);
+        }
+      }
+    }
+
+    return immutableMap;
   }
 
   @Override

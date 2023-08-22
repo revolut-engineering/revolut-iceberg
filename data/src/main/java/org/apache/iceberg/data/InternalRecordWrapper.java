@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.data;
 
 import java.lang.reflect.Array;
@@ -37,9 +36,15 @@ public class InternalRecordWrapper implements StructLike {
 
   @SuppressWarnings("unchecked")
   public InternalRecordWrapper(Types.StructType struct) {
-    this.transforms = struct.fields().stream()
-        .map(field -> converter(field.type()))
-        .toArray(length -> (Function<Object, Object>[]) Array.newInstance(Function.class, length));
+    this(
+        struct.fields().stream()
+            .map(field -> converter(field.type()))
+            .toArray(
+                length -> (Function<Object, Object>[]) Array.newInstance(Function.class, length)));
+  }
+
+  private InternalRecordWrapper(Function<Object, Object>[] transforms) {
+    this.transforms = transforms;
   }
 
   private static Function<Object, Object> converter(Type type) {
@@ -68,6 +73,10 @@ public class InternalRecordWrapper implements StructLike {
     return wrapped;
   }
 
+  public InternalRecordWrapper copyFor(StructLike record) {
+    return new InternalRecordWrapper(transforms).wrap(record);
+  }
+
   public InternalRecordWrapper wrap(StructLike record) {
     this.wrapped = record;
     return this;
@@ -81,7 +90,13 @@ public class InternalRecordWrapper implements StructLike {
   @Override
   public <T> T get(int pos, Class<T> javaClass) {
     if (transforms[pos] != null) {
-      return javaClass.cast(transforms[pos].apply(wrapped.get(pos, Object.class)));
+      Object value = wrapped.get(pos, Object.class);
+      if (value == null) {
+        // transforms function don't allow to handle null values, so just return null here.
+        return null;
+      } else {
+        return javaClass.cast(transforms[pos].apply(value));
+      }
     }
     return wrapped.get(pos, javaClass);
   }

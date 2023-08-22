@@ -16,40 +16,55 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.hive;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.iceberg.common.DynConstructors;
+import org.apache.iceberg.ClientPoolImpl;
+import org.apache.iceberg.common.DynMethods;
+import org.apache.iceberg.relocated.com.google.common.annotations.VisibleForTesting;
 import org.apache.thrift.TException;
 import org.apache.thrift.transport.TTransportException;
 
-public class HiveClientPool extends ClientPool<HiveMetaStoreClient, TException> {
+public class HiveClientPool extends ClientPoolImpl<IMetaStoreClient, TException> {
 
-  // use appropriate ctor depending on whether we're working with Hive2 or Hive3 dependencies
-  // we need to do this because there is a breaking API change between Hive2 and Hive3
-  private static final DynConstructors.Ctor<HiveMetaStoreClient> CLIENT_CTOR = DynConstructors.builder()
-          .impl(HiveMetaStoreClient.class, HiveConf.class)
-          .impl(HiveMetaStoreClient.class, Configuration.class)
-          .build();
+  private static final DynMethods.StaticMethod GET_CLIENT =
+      DynMethods.builder("getProxy")
+          .impl(
+              RetryingMetaStoreClient.class,
+              HiveConf.class,
+              HiveMetaHookLoader.class,
+              String.class) // Hive 1 and 2
+          .impl(
+              RetryingMetaStoreClient.class,
+              Configuration.class,
+              HiveMetaHookLoader.class,
+              String.class) // Hive 3
+          .buildStatic();
 
   private final HiveConf hiveConf;
 
   public HiveClientPool(int poolSize, Configuration conf) {
-    super(poolSize, TTransportException.class);
+    // Do not allow retry by default as we rely on RetryingHiveClient
+    super(poolSize, TTransportException.class, false);
     this.hiveConf = new HiveConf(conf, HiveClientPool.class);
+    this.hiveConf.addResource(conf);
   }
 
   @Override
-  protected HiveMetaStoreClient newClient()  {
+  protected IMetaStoreClient newClient() {
     try {
       try {
-        return CLIENT_CTOR.newInstance(hiveConf);
+        return GET_CLIENT.invoke(
+            hiveConf, (HiveMetaHookLoader) tbl -> null, HiveMetaStoreClient.class.getName());
       } catch (RuntimeException e) {
-        // any MetaException would be wrapped into RuntimeException during reflection, so let's double-check type here
+        // any MetaException would be wrapped into RuntimeException during reflection, so let's
+        // double-check type here
         if (e.getCause() instanceof MetaException) {
           throw (MetaException) e.getCause();
         }
@@ -59,9 +74,11 @@ public class HiveClientPool extends ClientPool<HiveMetaStoreClient, TException> 
       throw new RuntimeMetaException(e, "Failed to connect to Hive Metastore");
     } catch (Throwable t) {
       if (t.getMessage().contains("Another instance of Derby may have already booted")) {
-        throw new RuntimeMetaException(t, "Failed to start an embedded metastore because embedded " +
-            "Derby supports only one client at a time. To fix this, use a metastore that supports " +
-            "multiple clients.");
+        throw new RuntimeMetaException(
+            t,
+            "Failed to start an embedded metastore because embedded "
+                + "Derby supports only one client at a time. To fix this, use a metastore that supports "
+                + "multiple clients.");
       }
 
       throw new RuntimeMetaException(t, "Failed to connect to Hive Metastore");
@@ -69,7 +86,7 @@ public class HiveClientPool extends ClientPool<HiveMetaStoreClient, TException> 
   }
 
   @Override
-  protected HiveMetaStoreClient reconnect(HiveMetaStoreClient client) {
+  protected IMetaStoreClient reconnect(IMetaStoreClient client) {
     try {
       client.close();
       client.reconnect();
@@ -81,12 +98,20 @@ public class HiveClientPool extends ClientPool<HiveMetaStoreClient, TException> 
 
   @Override
   protected boolean isConnectionException(Exception e) {
-    return super.isConnectionException(e) || (e != null && e instanceof MetaException &&
-        e.getMessage().contains("Got exception: org.apache.thrift.transport.TTransportException"));
+    return super.isConnectionException(e)
+        || (e != null
+            && e instanceof MetaException
+            && e.getMessage()
+                .contains("Got exception: org.apache.thrift.transport.TTransportException"));
   }
 
   @Override
-  protected void close(HiveMetaStoreClient client) {
+  protected void close(IMetaStoreClient client) {
     client.close();
+  }
+
+  @VisibleForTesting
+  HiveConf hiveConf() {
+    return hiveConf;
   }
 }

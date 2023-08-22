@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.avro;
 
 import java.io.IOException;
@@ -29,8 +28,12 @@ import org.apache.avro.io.Encoder;
 import org.apache.iceberg.FieldMetrics;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 
-class GenericAvroWriter<T> implements MetricsAwareDatumWriter<T> {
+public class GenericAvroWriter<T> implements MetricsAwareDatumWriter<T> {
   private ValueWriter<T> writer = null;
+
+  public static <D> GenericAvroWriter<D> create(Schema schema) {
+    return new GenericAvroWriter<>(schema);
+  }
 
   GenericAvroWriter(Schema schema) {
     setSchema(schema);
@@ -53,8 +56,7 @@ class GenericAvroWriter<T> implements MetricsAwareDatumWriter<T> {
   }
 
   private static class WriteBuilder extends AvroSchemaVisitor<ValueWriter<?>> {
-    private WriteBuilder() {
-    }
+    private WriteBuilder() {}
 
     @Override
     public ValueWriter<?> record(Schema record, List<String> names, List<ValueWriter<?>> fields) {
@@ -63,10 +65,12 @@ class GenericAvroWriter<T> implements MetricsAwareDatumWriter<T> {
 
     @Override
     public ValueWriter<?> union(Schema union, List<ValueWriter<?>> options) {
-      Preconditions.checkArgument(options.contains(ValueWriters.nulls()),
-          "Cannot create writer for non-option union: %s", union);
-      Preconditions.checkArgument(options.size() == 2,
-          "Cannot create writer for non-option union: %s", union);
+      Preconditions.checkArgument(
+          options.contains(ValueWriters.nulls()),
+          "Cannot create writer for non-option union: %s",
+          union);
+      Preconditions.checkArgument(
+          options.size() == 2, "Cannot create writer for non-option union: %s", union);
       if (union.getTypes().get(0).getType() == Schema.Type.NULL) {
         return ValueWriters.option(0, options.get(1));
       } else {

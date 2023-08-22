@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.iceberg.types;
 
 import java.util.List;
@@ -24,8 +23,7 @@ import java.util.function.IntFunction;
 import org.apache.iceberg.StructLike;
 
 public class JavaHashes {
-  private JavaHashes() {
-  }
+  private JavaHashes() {}
 
   public static int hashCode(CharSequence str) {
     int result = 177;
@@ -51,16 +49,17 @@ public class JavaHashes {
   private static class CharSequenceHash implements JavaHash<Object> {
     private static final CharSequenceHash INSTANCE = new CharSequenceHash();
 
-    private CharSequenceHash() {
-    }
+    private CharSequenceHash() {}
 
     @Override
     public int hash(Object str) {
       if (str instanceof CharSequence) {
         return JavaHashes.hashCode((CharSequence) str);
       } else if (str != null) {
-        // UnknownTransform results are assumed to be string, the most generic type. But there is no guarantee that the
-        // values actually are strings so this can receive non-string values to hash. To get a consistent hash code for
+        // UnknownTransform results are assumed to be string, the most generic type. But there is no
+        // guarantee that the
+        // values actually are strings so this can receive non-string values to hash. To get a
+        // consistent hash code for
         // those values, convert to string an hash the string.
         return JavaHashes.hashCode(str.toString());
       }
@@ -73,14 +72,19 @@ public class JavaHashes {
     private final JavaHash<Object>[] hashes;
 
     private StructLikeHash(Types.StructType struct) {
-      this.hashes = struct.fields().stream()
-          .map(Types.NestedField::type)
-          .map(JavaHash::forType)
-          .toArray((IntFunction<JavaHash<Object>[]>) JavaHash[]::new);
+      this.hashes =
+          struct.fields().stream()
+              .map(Types.NestedField::type)
+              .map(JavaHash::forType)
+              .toArray((IntFunction<JavaHash<Object>[]>) JavaHash[]::new);
     }
 
     @Override
     public int hash(StructLike struct) {
+      if (struct == null) {
+        return 0;
+      }
+
       int result = 97;
       int len = hashes.length;
       result = 41 * result + len;
@@ -100,11 +104,14 @@ public class JavaHashes {
 
     @Override
     public int hash(List<?> list) {
+      if (list == null) {
+        return 0;
+      }
+
       int result = 17;
-      int len = list.size();
-      result = 37 * result + len;
-      for (int i = 0; i < len; i += 1) {
-        result = 37 * result + elementHash.hash(list.get(i));
+      result = 37 * result + list.size();
+      for (Object o : list) {
+        result = 37 * result + elementHash.hash(o);
       }
       return result;
     }
