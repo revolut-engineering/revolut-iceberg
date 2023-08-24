@@ -279,7 +279,8 @@ abstract class BaseSparkAction<ThisT> {
 
     return allManifests
         .flatMap(new ReadManifest(tableBroadcast), FileInfo.ENCODER)
-        .toDF("file_path","file_type").drop("file_type");
+        .toDF("file_path", "file_type")
+        .drop("file_type");
   }
 
   protected Dataset<Row> buildValidDataFileDFWithSnapshotId(Table table) {

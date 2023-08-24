@@ -419,7 +419,10 @@ public class TestCopyTableAction extends SparkTestBase {
     Long secondSnapshotId = sourceTable.currentSnapshot().snapshotId();
 
     // roll back to the first snapshot(v2)
-    sourceTable.manageSnapshots().setCurrentSnapshot(sourceTable.currentSnapshot().parentId()).commit();
+    sourceTable
+        .manageSnapshots()
+        .setCurrentSnapshot(sourceTable.currentSnapshot().parentId())
+        .commit();
 
     // add a new snapshot
     List<ThreeColumnRecord> records =
