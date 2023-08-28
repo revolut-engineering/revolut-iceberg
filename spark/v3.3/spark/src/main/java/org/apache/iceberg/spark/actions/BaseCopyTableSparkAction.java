@@ -464,9 +464,8 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
     Dataset<ManifestFile> manifestDS =
         spark().createDataset(Lists.newArrayList(manifestFilesToRewrite), manifestFileEncoder);
 
-    Broadcast<FileIO> io = sparkContext().broadcast(SerializableTable.copyOf(table).io());
-    Broadcast<Map<Integer, PartitionSpec>> specsById =
-        sparkContext().broadcast(tableMetadata.specsById());
+    FileIO tableIO = SerializableTable.copyOf(table).io();
+    Broadcast<FileIO> io = sparkContext().broadcast(tableIO);
 
     return manifestDS
         .repartition(manifestFilesToRewrite.size())
@@ -475,7 +474,7 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
                 io,
                 stagingDir,
                 tableMetadata.formatVersion(),
-                specsById,
+                tableMetadata.specsById(),
                 sourcePrefix,
                 targetPrefix),
             manifestFileEncoder)
@@ -486,7 +485,7 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
       Broadcast<FileIO> io,
       String stagingLocation,
       int format,
-      Broadcast<Map<Integer, PartitionSpec>> specsById,
+      Map<Integer, PartitionSpec> specsById,
       String sourcePrefix,
       String targetPrefix) {
 
@@ -507,20 +506,19 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
       Broadcast<FileIO> io,
       String stagingLocation,
       int format,
-      Broadcast<Map<Integer, PartitionSpec>> specsById,
+      Map<Integer, PartitionSpec> specsById,
       String sourcePrefix,
       String targetPrefix)
       throws IOException {
 
     String stagingPath = stagingPath(manifestFile.path(), stagingLocation);
     OutputFile outputFile = io.value().newOutputFile(stagingPath);
-    PartitionSpec spec = specsById.getValue().get(manifestFile.partitionSpecId());
+    PartitionSpec spec = specsById.get(manifestFile.partitionSpecId());
     ManifestWriter<DataFile> writer =
         ManifestFiles.write(format, spec, outputFile, manifestFile.snapshotId());
 
     try (ManifestReader<DataFile> reader =
-        ManifestFiles.read(manifestFile, io.getValue(), specsById.getValue())
-            .select(Arrays.asList("*"))) {
+        ManifestFiles.read(manifestFile, io.getValue(), specsById).select(Arrays.asList("*"))) {
       reader
           .entries()
           .forEach(entry -> appendEntry(entry, writer, spec, sourcePrefix, targetPrefix));
