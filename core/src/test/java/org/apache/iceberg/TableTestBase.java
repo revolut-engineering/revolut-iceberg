@@ -57,7 +57,7 @@ public class TableTestBase {
   protected static final int BUCKETS_NUMBER = 16;
 
   // Partition spec used to create tables
-  protected static final PartitionSpec SPEC =
+  public static final PartitionSpec SPEC =
       PartitionSpec.builderFor(SCHEMA).bucket("data", BUCKETS_NUMBER).build();
 
   static final DataFile FILE_A =
@@ -97,6 +97,7 @@ public class TableTestBase {
           .withFileSizeInBytes(10)
           .withPartitionPath("data_bucket=1") // easy way to set partition data for now
           .withRecordCount(1)
+          .withSplitOffsets(ImmutableList.of(1L))
           .build();
   static final DeleteFile FILE_B_DELETES =
       FileMetadata.deleteFileBuilder(SPEC)
@@ -112,6 +113,7 @@ public class TableTestBase {
           .withFileSizeInBytes(10)
           .withPartitionPath("data_bucket=2") // easy way to set partition data for now
           .withRecordCount(1)
+          .withSplitOffsets(ImmutableList.of(2L, 8L))
           .build();
   static final DeleteFile FILE_C2_DELETES =
       FileMetadata.deleteFileBuilder(SPEC)
@@ -127,6 +129,7 @@ public class TableTestBase {
           .withFileSizeInBytes(10)
           .withPartitionPath("data_bucket=3") // easy way to set partition data for now
           .withRecordCount(1)
+          .withSplitOffsets(ImmutableList.of(0L, 3L, 6L))
           .build();
   static final DeleteFile FILE_D2_DELETES =
       FileMetadata.deleteFileBuilder(SPEC)
