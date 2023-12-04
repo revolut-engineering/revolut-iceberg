@@ -96,6 +96,11 @@ public class SparkActions implements ActionsProvider {
   }
 
   @Override
+  public RewritePositionDeleteFilesSparkAction rewritePositionDeletes(Table table) {
+    return new RewritePositionDeleteFilesSparkAction(spark, table);
+  }
+
+  @Override
   public CopyTable copyTable(Table table) {
     return new BaseCopyTableSparkAction(spark, table);
   }
