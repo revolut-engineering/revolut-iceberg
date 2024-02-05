@@ -27,8 +27,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
+import org.apache.iceberg.DeleteFile;
+import org.apache.iceberg.FileMetadata;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.ManifestEntry;
 import org.apache.iceberg.ManifestFile;
@@ -492,28 +495,41 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
     return rows -> {
       List<ManifestFile> manifests = Lists.newArrayList();
       while (rows.hasNext()) {
-        manifests.add(
-            writeManifest(
-                rows.next(), io, stagingLocation, format, specsById, sourcePrefix, targetPrefix));
+        ManifestFile manifestFile = rows.next();
+        String stagingPath = stagingPath(manifestFile.path(), stagingLocation);
+
+        switch (manifestFile.content()) {
+          case DATA:
+            manifests.add(
+                writeDataManifest(
+                    manifestFile, stagingPath, io, format, specsById, sourcePrefix, targetPrefix));
+            break;
+          case DELETES:
+            manifests.add(
+                writeDeleteManifest(
+                    manifestFile, stagingPath, io, format, specsById, sourcePrefix, targetPrefix));
+            break;
+          default:
+            throw new UnsupportedOperationException(
+                "Unknown manifest type: " + manifestFile.content());
+        }
       }
 
       return manifests.iterator();
     };
   }
 
-  private static ManifestFile writeManifest(
+  private static ManifestFile writeDataManifest(
       ManifestFile manifestFile,
+      String stagingPath,
       Broadcast<FileIO> io,
-      String stagingLocation,
       int format,
       Map<Integer, PartitionSpec> specsById,
       String sourcePrefix,
       String targetPrefix)
       throws IOException {
-
-    String stagingPath = stagingPath(manifestFile.path(), stagingLocation);
-    OutputFile outputFile = io.value().newOutputFile(stagingPath);
     PartitionSpec spec = specsById.get(manifestFile.partitionSpecId());
+    OutputFile outputFile = io.value().newOutputFile(stagingPath);
     ManifestWriter<DataFile> writer =
         ManifestFiles.write(format, spec, outputFile, manifestFile.snapshotId());
 
@@ -521,37 +537,82 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
         ManifestFiles.read(manifestFile, io.getValue(), specsById).select(Arrays.asList("*"))) {
       reader
           .entries()
-          .forEach(entry -> appendEntry(entry, writer, spec, sourcePrefix, targetPrefix));
+          .forEach(
+              entry ->
+                  appendEntryWithFile(
+                      entry, writer, newDataEntryFile(entry, spec, sourcePrefix, targetPrefix)));
     } finally {
       writer.close();
     }
-
     return writer.toManifestFile();
   }
 
-  private static void appendEntry(
-      ManifestEntry<DataFile> entry,
-      ManifestWriter<DataFile> writer,
+  private static DataFile newDataEntryFile(
+      ManifestEntry<DataFile> entry, PartitionSpec spec, String sourcePrefix, String targetPrefix) {
+    DataFile file = entry.file();
+    String filePath = file.path().toString();
+    if (filePath.startsWith(sourcePrefix)) {
+      filePath = newPath(filePath, sourcePrefix, targetPrefix);
+      file = DataFiles.builder(spec).copy(entry.file()).withPath(filePath).build();
+    }
+    return file;
+  }
+
+  private static ManifestFile writeDeleteManifest(
+      ManifestFile manifestFile,
+      String stagingPath,
+      Broadcast<FileIO> io,
+      int format,
+      Map<Integer, PartitionSpec> specsById,
+      String sourcePrefix,
+      String targetPrefix)
+      throws IOException {
+    PartitionSpec spec = specsById.get(manifestFile.partitionSpecId());
+    OutputFile outputFile = io.value().newOutputFile(stagingPath);
+    ManifestWriter<DeleteFile> writer =
+        ManifestFiles.writeDeleteManifest(format, spec, outputFile, manifestFile.snapshotId());
+
+    try (ManifestReader<DeleteFile> reader =
+        ManifestFiles.readDeleteManifest(manifestFile, io.getValue(), specsById)
+            .select(Arrays.asList("*"))) {
+      reader
+          .entries()
+          .forEach(
+              entry ->
+                  appendEntryWithFile(
+                      entry, writer, newDeleteEntryFile(entry, spec, sourcePrefix, targetPrefix)));
+    } finally {
+      writer.close();
+    }
+    return writer.toManifestFile();
+  }
+
+  private static DeleteFile newDeleteEntryFile(
+      ManifestEntry<DeleteFile> entry,
       PartitionSpec spec,
       String sourcePrefix,
       String targetPrefix) {
-    DataFile dataFile = entry.file();
-    String dataFilePath = dataFile.path().toString();
-    if (dataFilePath.startsWith(sourcePrefix)) {
-      dataFilePath = newPath(dataFilePath, sourcePrefix, targetPrefix);
-      dataFile = DataFiles.builder(spec).copy(entry.file()).withPath(dataFilePath).build();
+    DeleteFile file = entry.file();
+    String filePath = file.path().toString();
+    if (filePath.startsWith(sourcePrefix)) {
+      filePath = newPath(filePath, sourcePrefix, targetPrefix);
+      file = FileMetadata.deleteFileBuilder(spec).copy(file).withPath(filePath).build();
     }
+    return file;
+  }
 
+  private static <F extends ContentFile<F>> void appendEntryWithFile(
+      ManifestEntry<F> entry, ManifestWriter<F> writer, F file) {
     switch (entry.status()) {
       case ADDED:
-        writer.add(dataFile);
+        writer.add(file);
         break;
       case EXISTING:
         writer.existing(
-            dataFile, entry.snapshotId(), entry.dataSequenceNumber(), entry.fileSequenceNumber());
+            file, entry.snapshotId(), entry.dataSequenceNumber(), entry.fileSequenceNumber());
         break;
       case DELETED:
-        writer.delete(dataFile, entry.dataSequenceNumber(), entry.fileSequenceNumber());
+        writer.delete(file, entry.dataSequenceNumber(), entry.fileSequenceNumber());
         break;
     }
   }

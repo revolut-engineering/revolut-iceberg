@@ -28,6 +28,8 @@ import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.DeleteFile;
+import org.apache.iceberg.Files;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
@@ -38,6 +40,7 @@ import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.actions.ActionsProvider;
 import org.apache.iceberg.actions.CopyTable;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.data.FileHelpers;
 import org.apache.iceberg.hadoop.HadoopTables;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -46,6 +49,7 @@ import org.apache.iceberg.spark.SparkCatalog;
 import org.apache.iceberg.spark.SparkTestBase;
 import org.apache.iceberg.spark.source.ThreeColumnRecord;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.Pair;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Encoders;
 import org.apache.spark.sql.Row;
@@ -262,6 +266,34 @@ public class TestCopyTableAction extends SparkTestBase {
         "There are only one row left since we deleted a data file",
         1,
         resultDF.as(Encoders.bean(ThreeColumnRecord.class)).count());
+  }
+
+  @Test
+  public void testWithDeleteManifests() throws Exception {
+    String location = newTableLocation();
+    Table sourceTable = createATableWith2Snapshots(location);
+    String targetLocation = newTableLocation();
+
+    System.out.println(sourceTable);
+    System.out.println(sourceTable.name());
+
+    List<Pair<CharSequence, Long>> deletes = Lists.newArrayList();
+    DeleteFile positionDeletes =
+        FileHelpers.writeDeleteFile(table, Files.localOutput(temp.newFile()), deletes).first();
+
+    sourceTable.newRowDelta().addDeletes(positionDeletes).commit();
+    sourceTable.refresh();
+
+    CopyTable.Result result =
+        actions().copyTable(sourceTable).rewriteLocationPrefix(location, targetLocation).execute();
+
+    checkMetadataFileNum(4, 3, 3, result);
+    checkDataFileNum(2, result);
+
+    // copy the metadata files and data files
+    moveTableFiles(location, targetLocation, stagingDir(result));
+
+    // XXX
   }
 
   @Test
