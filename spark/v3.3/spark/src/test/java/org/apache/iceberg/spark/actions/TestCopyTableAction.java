@@ -29,7 +29,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.AssertHelpers;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.DeleteFile;
-import org.apache.iceberg.Files;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
@@ -274,26 +273,42 @@ public class TestCopyTableAction extends SparkTestBase {
     Table sourceTable = createATableWith2Snapshots(location);
     String targetLocation = newTableLocation();
 
-    System.out.println(sourceTable);
-    System.out.println(sourceTable.name());
+    List<Pair<CharSequence, Long>> deletes =
+        Lists.newArrayList(
+            Pair.of(
+                sourceTable
+                    .currentSnapshot()
+                    .addedDataFiles(sourceTable.io())
+                    .iterator()
+                    .next()
+                    .path(),
+                0L));
 
-    List<Pair<CharSequence, Long>> deletes = Lists.newArrayList();
+    File file = new File(removePrefix(sourceTable.location()) + "/data/deeply/nested/file.parquet");
     DeleteFile positionDeletes =
-        FileHelpers.writeDeleteFile(table, Files.localOutput(temp.newFile()), deletes).first();
+        FileHelpers.writeDeleteFile(
+                table, sourceTable.io().newOutputFile(file.toURI().toString()), deletes)
+            .first();
 
+    Dataset<Row> resultDF = spark.read().format("iceberg").load(location);
     sourceTable.newRowDelta().addDeletes(positionDeletes).commit();
-    sourceTable.refresh();
 
     CopyTable.Result result =
         actions().copyTable(sourceTable).rewriteLocationPrefix(location, targetLocation).execute();
 
+    // We have one more snapshot, an additional manifest list, and a new (delete) manifest
     checkMetadataFileNum(4, 3, 3, result);
-    checkDataFileNum(2, result);
+    // We have one additional file for positional deletes
+    checkDataFileNum(3, result);
 
     // copy the metadata files and data files
     moveTableFiles(location, targetLocation, stagingDir(result));
 
-    // XXX
+    // Positional delete affects a single row, so only one row must remain
+    Assert.assertEquals(
+        "The number of rows should be",
+        1,
+        spark.read().format("iceberg").load(targetLocation).count());
   }
 
   @Test
@@ -722,8 +737,8 @@ public class TestCopyTableAction extends SparkTestBase {
       throws Exception {
     FileUtils.copyDirectory(
         new File(removePrefix(sourceDir) + "data/"), new File(removePrefix(targetDir) + "/data/"));
-    FileUtils.copyDirectory(
-        new File(removePrefix(stagingDir)), new File(removePrefix(targetDir) + "/metadata/"));
+    // Copy staged metadata files, overwrite previously copied data files with staged ones
+    FileUtils.copyDirectory(new File(removePrefix(stagingDir)), new File(removePrefix(targetDir)));
   }
 
   private String removePrefix(String path) {

@@ -101,7 +101,7 @@ public class ManifestFiles {
   public static CloseableIterable<Pair<String, Long>> readPathsWithSnapshotId(
       ManifestFile manifest, FileIO io) {
     return CloseableIterable.transform(
-        read(manifest, io, null).select(ImmutableList.of("file_path", "snapshot_id")).liveEntries(),
+        open(manifest, io, null).select(ImmutableList.of("file_path", "snapshot_id")).liveEntries(),
         entry -> Pair.of(entry.file().path().toString(), entry.snapshotId()));
   }
 
