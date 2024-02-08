@@ -693,7 +693,8 @@ public class BaseCopyTableSparkAction extends BaseSparkAction<CopyTable> impleme
           writer.write(newPositionDeleteRecord(record, sourcePrefix, targetPrefix));
         }
 
-        for (; recordIt.hasNext(); record = recordIt.next()) {
+        while (recordIt.hasNext()) {
+          record = recordIt.next();
           writer.write(newPositionDeleteRecord(record, sourcePrefix, targetPrefix));
         }
       } finally {
